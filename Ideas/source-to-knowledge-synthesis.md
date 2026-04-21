@@ -15,9 +15,11 @@ To eliminate AI "hallucinations," the tool uses a two-layer approach:
 - **Hard Facts (The Skeleton)**: Values like algorithm names, thresholds, and limits are extracted directly from the AST (Abstract Syntax Tree).
 - **AI Narrative (The Muscle)**: The local LLM writes the "Human" explanation of why those numbers matter (e.g., *"This means you can lose two shards and still recover your vault"*).
 
-### 3. Leveraging the "Writing Tools" API
-- **Apple Intelligence**: Uses on-device Foundation Models for synthesis.
-- **Security**: Since the LLM runs locally on the developer's Mac, the source code never leaves the device—a critical requirement for security-focused apps (like those using SSS).
+### 3. Native-Only Intelligence (Apple Foundation Models)
+Docent Autopilot is built strictly on **Apple's native Foundation Models/Writing Tools APIs**. We intentionally reject bundling foreign LLMs (like Llama) for three critical reasons:
+- **Zero Bloat**: No several-gigabyte model weights to download. The toolchain remains tiny because the "brain" is already on the developer's Mac.
+- **Privacy & Security**: Source code never leaves the developer's trusted environment. By using system-level models, we inherit Apple's on-device privacy guarantees—essential for apps handling sensitive logic like Shamir Secret Sharing.
+- **ANE Optimization**: Leveraging the Apple Neural Engine (ANE) ensures that documentation synthesis is fast, energy-efficient, and doesn't thermal-throttle the developer's machine during builds.
 
 ### 4. Handling Dynamic App State (Runtime Variables)
 Since users often choose their own configurations (e.g., custom shard counts or thresholds in SSS), the tool doesn't just generate static text.
