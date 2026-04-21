@@ -1,16 +1,37 @@
-// swift-tools-version: 6.2
-// The swift-tools-version declares the minimum version of Swift required to build this package.
-
+// swift-tools-version: 6.0
 import PackageDescription
 
 let package = Package(
-    name: "DocentValidator",
-    platforms: [.macOS(.v13)],
+    name: "Docent",
+    platforms: [.macOS(.v13), .iOS(.v16)],
+    products: [
+        .library(name: "Docent", targets: ["Docent"]),
+        .executable(name: "docent-compiler", targets: ["DocentCompiler"]),
+        .plugin(name: "DocentPlugin", targets: ["DocentPlugin"])
+    ],
+    dependencies: [
+        // No external dependencies for core, keeping it lightweight.
+    ],
     targets: [
-        // Targets are the basic building blocks of a package, defining a module or a test suite.
-        // Targets can depend on other targets in this package and products from dependencies.
+        .target(
+            name: "Docent",
+            dependencies: [],
+            path: "Sources/Docent"
+        ),
         .executableTarget(
-            name: "DocentValidator"
+            name: "DocentCompiler",
+            dependencies: ["Docent"],
+            path: "Sources/DocentCompiler"
+        ),
+        .plugin(
+            name: "DocentPlugin",
+            capability: .buildTool(),
+            dependencies: ["DocentCompiler"],
+            path: "Sources/DocentPlugin"
+        ),
+        .testTarget(
+            name: "DocentTests",
+            dependencies: ["Docent"]
         ),
     ]
 )
