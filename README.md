@@ -14,37 +14,49 @@ Instead of forcing users to scroll through static FAQs or leave your app for a s
 
 ## How It Works
 
-1. **Write:** You write your documentation in Markdown (`/DocentDocs`).
-2. **Compile:** An SPM Build Tool Plugin runs during compilation, chunking your Markdown and generating semantic embeddings.
-3. **Embed:** A compact binary index (`.docent`) is packed into your app bundle.
-4. **Query:** At runtime, the `DocentEngine` uses on-device vector search to find the most relevant answers.
+1. **Write:** You write your documentation in Markdown folders.
+2. **Compile:** The **DocentPlugin** runs during the Xcode build, invoking the compiler to chunk your Markdown and generate embeddings.
+3. **Embed:** An optimized, read-only **SQLite** index (`.docent`) is packed into your app bundle.
+4. **Query:** At runtime, the **DocentEngine** uses the **Accelerate** framework to find relevant matches with near-zero latency.
 
-## Current Status: v0.1 — Proof of Concept (Complete)
+## Current Status: v0.5 — Private Alpha (Core Functional)
 
-We have successfully validated the core technical thesis: **Can Apple's native `NLEmbedding` handle technical documentation?**
+The core toolchain is now functionally complete.
 
-- **Benchmark Results:** Achieved **0.91 Precision@3** across 100 queries on technical document sets.
-- **Status:** Core retrieval logic is verified. Moving toward v0.5 (Private Alpha).
+- **Automated Pipeline:** Full SPM Build Tool Plugin integration.
+- **Optimized Storage:** SQLite-backed index with `VACUUM` and `ANALYZE` for high-speed read performance.
+- **Security:** Optional **CryptoKit (AES-GCM)** content encryption at rest.
+- **Validation:** 0.91 Precision@3 on technical documentation benchmarks.
 
 ## Roadmap
 
 - [x] **v0.1 — Proof of Concept:** Validate `NLEmbedding` quality.
-- [ ] **v0.5 — Private Alpha:** 
-    - SPM Build Tool Plugin implementation.
-    - `.docent` binary format specification.
-    - Headless `DocentEngine` runtime.
+- [x] **v0.5 — Private Alpha:** 
+    - [x] SPM Build Tool Plugin implementation.
+    - [x] SQLite binary format (`.docent`).
+    - [x] Headless `DocentEngine` runtime with Accelerate.
+    - [x] AES-GCM Content Encryption.
 - [ ] **v1.0 — Public Launch:** 
-    - `DocentUI` (SwiftUI components).
-    - Incremental build support.
-    - Full documentation and example apps.
+    - `DocentUI`: Pre-built SwiftUI search and chat components.
+    - YAML Frontmatter support for priorities and tags.
+    - Incremental build support (caching unchanged chunks).
 
 ## Technical Architecture
 
 | Component | Role | Technology |
 |---|---|---|
 | `DocentPlugin` | SPM build tool plugin | Swift, `PackagePlugin` |
-| `DocentEngine` | Runtime query API | Swift, `NaturalLanguage` |
-| `.docent` format | Compiled binary index | Custom Binary / SQLite |
+| `docent-compiler` | CLI build tool | Swift, `NaturalLanguage`, `SQLite3` |
+| `DocentEngine` | Runtime query API | Swift, `Accelerate`, `SQLite3` |
+| `.docent` format | Optimized index | SQLite (Encrypted via CryptoKit) |
+
+## Security
+
+Docent supports optional **AES-GCM encryption** via Apple's `CryptoKit`. 
+- **Build-time:** `docent-compiler --key <your-key>`
+- **Runtime:** `DocentEngine(resource: "Knowledge", encryption: .cryptoKit(key: "your-key"))`
+
+This protects your documentation text and vectors from being easily scraped from the app bundle while maintaining a tiny binary footprint.
 
 ## License
 
