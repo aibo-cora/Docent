@@ -67,13 +67,38 @@ let engine = try DocentEngine(resource: "Knowledge")
 let results = await engine.query("How do I reset my password?")
 
 for result in results {
-    print("Found in: \(result.chunk.sourceFile)")
+    print("Breadcrumb: \(result.chunk.breadcrumb)")
     print("Content: \(result.chunk.text)")
-    print("Score: \(result.score)")
+    print("Confidence: \(result.confidence)")
 }
 ```
 
-## Current Status: v0.5 — Private Alpha (Core Functional)
+## Markdown & Metadata Guide
+
+To get the best search results, Docent supports [YAML Frontmatter](https://assemble.io/docs/YAML-front-matter.html) and hierarchical [Markdown](https://www.markdownguide.org/basic-syntax/) structures.
+
+### Frontmatter Support
+You can define metadata at the top of your `.md` files:
+
+```markdown
+---
+title: Custom Page Title
+tags: account, security
+priority: 1.5
+---
+
+# Hierarchical Headers
+Docent respects your document structure.
+```
+
+- **title**: Overrides the auto-detected title.
+- **tags**: comma-separated strings for future filtering.
+- **priority**: A score multiplier (default 1.0) to boost important documents.
+
+### Hierarchical Chunking
+Docent automatically generates **Breadcrumbs** (e.g., `Setup > Step 1`) based on your header hierarchy (#, ##, ###). It also performs **Context Injection**, prepending parent titles to nested content to ensure the semantic search understands the full context of a sub-section.
+
+## Current Status: v0.6 — Parser Refinement (Functional)
 
 The core toolchain is now functionally complete.
 

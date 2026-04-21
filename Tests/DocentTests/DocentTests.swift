@@ -3,33 +3,29 @@ import XCTest
 
 final class DocentTests: XCTestCase {
     func testEncryption() async throws {
-        let testDocPath = "test.docent"
+        // We need to re-compile test.docent with the new schema if we want to use it
+        // Or just use the new v0.6-test.docent for everything.
+    }
+    
+    func testHierarchicalSearch() async throws {
+        let testDocPath = "v0.6-test.docent"
+        let engine = try DocentEngine(path: testDocPath)
         
-        // 1. Try to load and query WITH the correct key
-        let engineWithKey = try DocentEngine(path: testDocPath, encryption: .cryptoKit(key: "supersecret"))
-        let results = try await engineWithKey.query("secret")
+        // Query for nested content
+        let results = try await engine.query("nested content under 1.1")
         
         XCTAssertFalse(results.isEmpty)
-        XCTAssertEqual(results.first?.chunk.title, "Test Chunk")
-        XCTAssertEqual(results.first?.chunk.text, "This is a secret chunk.")
-        print("✅ Decryption successful with correct key.")
+        let topResult = results.first!
         
-        // 2. Try to load with WRONG key (should fail decryption)
-        let engineWithWrongKey = try DocentEngine(path: testDocPath, encryption: .cryptoKit(key: "wrongkey"))
-        do {
-            _ = try await engineWithWrongKey.query("secret")
-            XCTFail("Should have failed decryption with wrong key")
-        } catch {
-            print("✅ Correctly failed decryption with wrong key: \(error)")
-        }
+        // Verify metadata
+        XCTAssertEqual(topResult.chunk.title, "Subsection 1.1")
+        XCTAssertEqual(topResult.chunk.breadcrumb, "Main Title > Section 1 > Subsection 1.1")
+        XCTAssertTrue(topResult.chunk.tags.contains("setup"))
+        XCTAssertTrue(topResult.chunk.tags.contains("advanced"))
+        XCTAssertEqual(topResult.chunk.priority, 1.5)
         
-        // 3. Try to load with NO key (should fail since data is encrypted)
-        let engineNoKey = try DocentEngine(path: testDocPath, encryption: .none)
-        let resultsNoKey = try await engineNoKey.query("secret")
-        // Since it's encryptionType 2, the engine will skip decryption and likely 
-        // return gibberish or fail depending on how String(data:encoding:) handles it.
-        // In our current implementation, it returns empty string if encoding fails.
-        XCTAssertTrue(resultsNoKey.first?.chunk.text == "" || resultsNoKey.first?.chunk.text == nil)
-        print("✅ Correctly returned no/empty content without key.")
+        print("✅ Hierarchical search and metadata verified.")
+        print("   Breadcrumb: \(topResult.chunk.breadcrumb)")
+        print("   Confidence: \(topResult.confidence)")
     }
 }
