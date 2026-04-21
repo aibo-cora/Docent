@@ -87,9 +87,12 @@ class Compiler {
                 id INTEGER PRIMARY KEY,
                 file_path TEXT,
                 title TEXT,
+                breadcrumb TEXT,
                 content BLOB,
                 encryption_type INTEGER DEFAULT 0,
-                nonce BLOB
+                nonce BLOB,
+                priority REAL DEFAULT 1.0,
+                tags TEXT
             );
             
             CREATE TABLE docent_vectors (
@@ -119,34 +122,111 @@ class Compiler {
         print("  Processing: \(relativePath)")
         
         let content = try String(contentsOf: url)
-        let chunks = parseMarkdown(content)
+        let (metadata, markdown) = extractFrontmatter(content)
+        let chunks = parseMarkdown(markdown, fileMetadata: metadata)
         
         for chunk in chunks {
             try insertChunk(chunk, relativePath: relativePath, db: db)
         }
     }
 
-    private func parseMarkdown(_ text: String) -> [RawChunk] {
+    private func extractFrontmatter(_ text: String) -> (FileMetadata, String) {
+        let lines = text.components(separatedBy: .newlines)
+        guard lines.first?.trimmingCharacters(in: .whitespaces) == "---" else {
+            return (FileMetadata(), text)
+        }
+        
+        var frontmatter: [String] = []
+        var content: [String] = []
+        var inFrontmatter = true
+        
+        for (index, line) in lines.enumerated() {
+            if index == 0 { continue }
+            if inFrontmatter {
+                if line.trimmingCharacters(in: .whitespaces) == "---" {
+                    inFrontmatter = false
+                } else {
+                    frontmatter.append(line)
+                }
+            } else {
+                content.append(line)
+            }
+        }
+        
+        var metadata = FileMetadata()
+        for line in frontmatter {
+            let parts = line.components(separatedBy: ":")
+            if parts.count >= 2 {
+                let key = parts[0].trimmingCharacters(in: .whitespaces).lowercased()
+                let value = parts.dropFirst().joined(separator: ":").trimmingCharacters(in: .whitespaces)
+                
+                switch key {
+                case "title": metadata.title = value
+                case "tags": metadata.tags = value
+                case "priority": metadata.priority = Double(value) ?? 1.0
+                default: break
+                }
+            }
+        }
+        
+        return (metadata, content.joined(separator: "\n"))
+    }
+
+    private func parseMarkdown(_ text: String, fileMetadata: FileMetadata) -> [RawChunk] {
         var chunks: [RawChunk] = []
         let lines = text.components(separatedBy: .newlines)
         
-        var currentTitle = "Introduction"
+        var headerStack: [(level: Int, title: String)] = []
         var currentBody: [String] = []
         
+        func createChunk() {
+            guard !currentBody.isEmpty, !headerStack.isEmpty else { return }
+            let breadcrumb = headerStack.map { $0.title }.joined(separator: " > ")
+            let title = headerStack.last!.title
+            // Context injection: Prepend breadcrumb to body for better embedding
+            let contextBody = "\(breadcrumb): " + currentBody.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
+            
+            chunks.append(RawChunk(
+                title: title,
+                breadcrumb: breadcrumb,
+                body: contextBody,
+                priority: fileMetadata.priority,
+                tags: fileMetadata.tags
+            ))
+            currentBody = []
+        }
+
         for line in lines {
-            if line.hasPrefix("## ") {
-                if !currentBody.isEmpty {
-                    chunks.append(RawChunk(title: currentTitle, body: currentBody.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)))
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            if trimmed.hasPrefix("#") {
+                let level = trimmed.prefix(while: { $0 == "#" }).count
+                let title = trimmed.replacingOccurrences(of: String(repeating: "#", count: level), with: "").trimmingCharacters(in: .whitespaces)
+                
+                if level <= 3 { // We support up to ###
+                    createChunk()
+                    
+                    // Pop stack if new level is higher or equal
+                    while let last = headerStack.last, last.level >= level {
+                        headerStack.removeLast()
+                    }
+                    headerStack.append((level, title))
                 }
-                currentTitle = line.replacingOccurrences(of: "## ", with: "").trimmingCharacters(in: .whitespacesAndNewlines)
-                currentBody = []
-            } else if !line.hasPrefix("# ") {
+            } else {
                 currentBody.append(line)
             }
         }
         
-        if !currentBody.isEmpty {
-            chunks.append(RawChunk(title: currentTitle, body: currentBody.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)))
+        createChunk()
+        
+        // If no headers were found, treat the whole file as one chunk
+        if chunks.isEmpty && !currentBody.isEmpty {
+            chunks.append(RawChunk(
+                title: fileMetadata.title ?? "General",
+                breadcrumb: fileMetadata.title ?? "General",
+                body: currentBody.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines),
+                priority: fileMetadata.priority,
+                tags: fileMetadata.tags
+            ))
         }
         
         return chunks
@@ -186,16 +266,24 @@ class Compiler {
             encryptionType = 2
         }
         
-        let chunkSql = "INSERT INTO docent_chunks (file_path, title, content, encryption_type) VALUES (?, ?, ?, ?);"
+        let chunkSql = "INSERT INTO docent_chunks (file_path, title, breadcrumb, content, encryption_type, priority, tags) VALUES (?, ?, ?, ?, ?, ?, ?);"
         let chunkStmt = try db.prepare(sql: chunkSql)
         
         sqlite3_bind_text(chunkStmt, 1, (relativePath as NSString).utf8String, -1, nil)
         sqlite3_bind_text(chunkStmt, 2, (chunk.title as NSString).utf8String, -1, nil)
+        sqlite3_bind_text(chunkStmt, 3, (chunk.breadcrumb as NSString).utf8String, -1, nil)
         
         contentData.withUnsafeBytes { buf in
-            sqlite3_bind_blob(chunkStmt, 3, buf.baseAddress, Int32(contentData.count), nil)
+            sqlite3_bind_blob(chunkStmt, 4, buf.baseAddress, Int32(contentData.count), nil)
         }
-        sqlite3_bind_int(chunkStmt, 4, Int32(encryptionType))
+        sqlite3_bind_int(chunkStmt, 5, Int32(encryptionType))
+        sqlite3_bind_double(chunkStmt, 6, chunk.priority)
+        
+        if let tags = chunk.tags {
+            sqlite3_bind_text(chunkStmt, 7, (tags as NSString).utf8String, -1, nil)
+        } else {
+            sqlite3_bind_null(chunkStmt, 7)
+        }
         
         if sqlite3_step(chunkStmt) != SQLITE_DONE {
             throw DocentError.databaseError("Failed to insert chunk")
@@ -223,5 +311,14 @@ class Compiler {
 
 struct RawChunk {
     let title: String
+    let breadcrumb: String
     let body: String
+    let priority: Double
+    let tags: String?
+}
+
+struct FileMetadata {
+    var title: String?
+    var tags: String?
+    var priority: Double = 1.0
 }
