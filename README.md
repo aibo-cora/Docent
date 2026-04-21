@@ -19,6 +19,60 @@ Instead of forcing users to scroll through static FAQs or leave your app for a s
 3. **Embed:** An optimized, read-only **SQLite** index (`.docent`) is packed into your app bundle.
 4. **Query:** At runtime, the **DocentEngine** uses the **Accelerate** framework to find relevant matches with near-zero latency.
 
+## Getting Started
+
+### 1. Add Dependency
+Add Docent to your `Package.swift`:
+
+```swift
+dependencies: [
+    .package(url: "https://github.com/aibo-cora/Docent", from: "0.5.0")
+]
+```
+
+### 2. Configure Your Target
+Add the **DocentPlugin** and the **Docent** library to your app target:
+
+```swift
+.target(
+    name: "MyCoolApp",
+    dependencies: ["Docent"],
+    plugins: [
+        .plugin(name: "DocentPlugin", package: "Docent")
+    ]
+)
+```
+
+### 3. Add Documentation
+Create a folder named `DocentDocs` in your target's directory and drop your `.md` files there.
+
+```text
+MyCoolApp/
+├── Sources/
+└── DocentDocs/
+    ├── GettingStarted.md
+    └── Troubleshooting.md
+```
+
+## Usage
+
+### Simple Query
+Initialize the engine and perform a semantic search:
+
+```swift
+import Docent
+
+let engine = try DocentEngine(resource: "Knowledge")
+
+let results = await engine.query("How do I reset my password?")
+
+for result in results {
+    print("Found in: \(result.chunk.sourceFile)")
+    print("Content: \(result.chunk.text)")
+    print("Score: \(result.score)")
+}
+```
+
 ## Current Status: v0.5 — Private Alpha (Core Functional)
 
 The core toolchain is now functionally complete.
