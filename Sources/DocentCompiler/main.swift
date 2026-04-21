@@ -29,7 +29,7 @@ struct DocentCompiler {
             try await compiler.run()
             print("✅ Compilation complete!")
         } catch {
-            print("❌ Error: \(error.localizedDescription)")
+            print("error: \(error.localizedDescription)")
             exit(1)
         }
     }
@@ -153,7 +153,27 @@ class Compiler {
     }
 
     private func insertChunk(_ chunk: RawChunk, relativePath: String, db: SQLiteStore) throws {
-        guard let embedding = embedding, let vector = embedding.vector(for: chunk.body) else { return }
+        // Validate chunk
+        if chunk.body.isEmpty {
+            print("warning: Skipping empty chunk in '\(relativePath)' with title '\(chunk.title)'")
+            return
+        }
+        
+        // NLEmbedding has limits on sentence/paragraph length. 
+        // A rough limit for reliable embedding is ~2000 characters.
+        if chunk.body.count > 5000 {
+            print("warning: Chunk '\(chunk.title)' in '\(relativePath)' is very large (\(chunk.body.count) chars). Semantic search quality may decrease. Consider splitting with '##' headers.")
+        }
+
+        guard let embedding = embedding else {
+            print("error: NLEmbedding for English is not available on this system.")
+            throw DocentError.embeddingError("NLEmbedding unavailable")
+        }
+        
+        guard let vector = embedding.vector(for: chunk.body) else {
+            print("error: Failed to generate embedding vector for chunk '\(chunk.title)' in '\(relativePath)'.")
+            return 
+        }
         
         let floatVector = vector.map { Float32($0) }
         var vectorData = Data(bytes: floatVector, count: floatVector.count * MemoryLayout<Float32>.size)
