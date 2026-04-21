@@ -1,0 +1,129 @@
+{
+  "benchmarks": [
+    {
+      "file": "AccountSettings.md",
+      "queries": [
+        { "q": "How do I change my password?", "expected": "## Changing Password" },
+        { "q": "I want a new password", "expected": "## Changing Password" },
+        { "q": "Reset my security code", "expected": "## Changing Password" },
+        { "q": "How to enable two factor auth?", "expected": "## Two-Factor Authentication" },
+        { "q": "Setting up 2FA", "expected": "## Two-Factor Authentication" },
+        { "q": "Does it support Authy?", "expected": "## Two-Factor Authentication" },
+        { "q": "Delete my account", "expected": "## Deleting Account" },
+        { "q": "Remove all my data permanently", "expected": "## Deleting Account" },
+        { "q": "How long until data is gone after deletion?", "expected": "## Deleting Account" },
+        { "q": "Change my email address", "expected": "## Updating Email" },
+        { "q": "New email verification", "expected": "## Updating Email" },
+        { "q": "Update profile mail", "expected": "## Updating Email" },
+        { "q": "Cancel my subscription", "expected": "## Managing Subscriptions" },
+        { "q": "Where to see my billing info?", "expected": "## Managing Subscriptions" },
+        { "q": "Manage active plans", "expected": "## Managing Subscriptions" },
+        { "q": "Security settings location", "expected": "## Changing Password" },
+        { "q": "Authenticator app support", "expected": "## Two-Factor Authentication" },
+        { "q": "Permanently close account", "expected": "## Deleting Account" },
+        { "q": "Verification link not received", "expected": "## Updating Email" },
+        { "q": "Stop recurring payments", "expected": "## Managing Subscriptions" }
+      ]
+    },
+    {
+      "file": "Troubleshooting.md",
+      "queries": [
+        { "q": "The app keeps crashing", "expected": "## App Crashing on Launch" },
+        { "q": "Crash at startup", "expected": "## App Crashing on Launch" },
+        { "q": "How to clear cache?", "expected": "## App Crashing on Launch" },
+        { "q": "Where is my data?", "expected": "## Missing Data" },
+        { "q": "Items not appearing", "expected": "## Missing Data" },
+        { "q": "Check internet for missing files", "expected": "## Missing Data" },
+        { "q": "App is very slow", "expected": "## Slow Performance" },
+        { "q": "Lagging performance", "expected": "## Slow Performance" },
+        { "q": "Close background apps for speed", "expected": "## Slow Performance" },
+        { "q": "Battery is dying fast", "expected": "## Battery Drain" },
+        { "q": "Power consumption issues", "expected": "## Battery Drain" },
+        { "q": "Location services battery impact", "expected": "## Battery Drain" },
+        { "q": "Not getting notifications", "expected": "## Notification Issues" },
+        { "q": "Alerts not working", "expected": "## Notification Issues" },
+        { "q": "Enable push notifications in settings", "expected": "## Notification Issues" },
+        { "q": "Fix launch issues", "expected": "## App Crashing on Launch" },
+        { "q": "Sync failed data missing", "expected": "## Missing Data" },
+        { "q": "Phone getting hot and slow", "expected": "## Slow Performance" },
+        { "q": "Privacy settings for battery", "expected": "## Battery Drain" },
+        { "q": "Missed messages no alerts", "expected": "## Notification Issues" }
+      ]
+    },
+    {
+      "file": "SyncIssues.md",
+      "queries": [
+        { "q": "How to force a sync?", "expected": "## Manual Sync" },
+        { "q": "Pull to refresh sync", "expected": "## Manual Sync" },
+        { "q": "Syncing on data plan", "expected": "## Syncing over Cellular" },
+        { "q": "Use mobile data for sync", "expected": "## Syncing over Cellular" },
+        { "q": "Wi-Fi only sync settings", "expected": "## Syncing over Cellular" },
+        { "q": "Two devices changed the same file", "expected": "## Conflict Resolution" },
+        { "q": "What happens during a conflict?", "expected": "## Conflict Resolution" },
+        { "q": "See activity log for changes", "expected": "## Conflict Resolution" },
+        { "q": "Disk full error", "expected": "## Storage Full" },
+        { "q": "Out of space for sync", "expected": "## Storage Full" },
+        { "q": "Sync paused due to storage", "expected": "## Storage Full" },
+        { "q": "iCloud sync setup", "expected": "## Syncing with iCloud" },
+        { "q": "Enable iCloud Drive for sync", "expected": "## Syncing with iCloud" },
+        { "q": "Cross-device synchronization", "expected": "## Syncing with iCloud" },
+        { "q": "Manually update data", "expected": "## Manual Sync" },
+        { "q": "Cellular network syncing", "expected": "## Syncing over Cellular" },
+        { "q": "Recent changes overwritten", "expected": "## Conflict Resolution" },
+        { "q": "Not enough room on phone", "expected": "## Storage Full" },
+        { "q": "Cloud sync settings", "expected": "## Syncing with iCloud" },
+        { "q": "Refresh from server", "expected": "## Manual Sync" }
+      ]
+    },
+    {
+      "file": "Authentication.md",
+      "queries": [
+        { "q": "Use FaceID to login", "expected": "## Biometric Login" },
+        { "q": "Fingerprint sign in", "expected": "## Biometric Login" },
+        { "q": "Forgot my password", "expected": "## Resetting Forgotten Password" },
+        { "q": "Reset link for login", "expected": "## Resetting Forgotten Password" },
+        { "q": "I am locked out", "expected": "## Login Lockout" },
+        { "q": "Too many failed attempts", "expected": "## Login Lockout" },
+        { "q": "Link Google account", "expected": "## Social Login Links" },
+        { "q": "Apple ID sign in integration", "expected": "## Social Login Links" },
+        { "q": "Manage social connections", "expected": "## Social Login Links" },
+        { "q": "Logged out automatically", "expected": "## Session Timeout" },
+        { "q": "Session expired", "expected": "## Session Timeout" },
+        { "q": "Login again after 30 days", "expected": "## Session Timeout" },
+        { "q": "TouchID settings", "expected": "## Biometric Login" },
+        { "q": "Password reset email not coming", "expected": "## Resetting Forgotten Password" },
+        { "q": "How long is the lockout?", "expected": "## Login Lockout" },
+        { "q": "Sign in with Apple", "expected": "## Social Login Links" },
+        { "q": "Automatic logout duration", "expected": "## Session Timeout" },
+        { "q": "Enable biometrics", "expected": "## Biometric Login" },
+        { "q": "Forgotten credentials help", "expected": "## Resetting Forgotten Password" },
+        { "q": "Account disabled after too many tries", "expected": "## Login Lockout" }
+      ]
+    },
+    {
+      "file": "Payments.md",
+      "queries": [
+        { "q": "Can I use PayPal?", "expected": "## Supported Payment Methods" },
+        { "q": "Accepted cards", "expected": "## Supported Payment Methods" },
+        { "q": "Apple Pay support", "expected": "## Supported Payment Methods" },
+        { "q": "Get a refund", "expected": "## Refunding a Purchase" },
+        { "q": "Money back request", "expected": "## Refunding a Purchase" },
+        { "q": "Contact Apple for billing", "expected": "## Refunding a Purchase" },
+        { "q": "Change credit card info", "expected": "## Updating Credit Card" },
+        { "q": "New billing address", "expected": "## Updating Credit Card" },
+        { "q": "App Store payment settings", "expected": "## Updating Credit Card" },
+        { "q": "Where are my invoices?", "expected": "## Invoice History" },
+        { "q": "Download receipt", "expected": "## Invoice History" },
+        { "q": "Web dashboard billing history", "expected": "## Invoice History" },
+        { "q": "Payment failed", "expected": "## Failed Transactions" },
+        { "q": "Transaction declined", "expected": "## Failed Transactions" },
+        { "q": "Card expired issues", "expected": "## Failed Transactions" },
+        { "q": "Visa and Mastercard support", "expected": "## Supported Payment Methods" },
+        { "q": "Billing dispute", "expected": "## Refunding a Purchase" },
+        { "q": "Update payment method", "expected": "## Updating Credit Card" },
+        { "q": "View purchase history", "expected": "## Invoice History" },
+        { "q": "Bank rejected payment", "expected": "## Failed Transactions" }
+      ]
+    }
+  ]
+}
