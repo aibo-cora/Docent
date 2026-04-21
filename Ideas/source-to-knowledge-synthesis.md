@@ -19,7 +19,13 @@ To eliminate AI "hallucinations," the tool uses a two-layer approach:
 - **Apple Intelligence**: Uses on-device Foundation Models for synthesis.
 - **Security**: Since the LLM runs locally on the developer's Mac, the source code never leaves the device—a critical requirement for security-focused apps (like those using SSS).
 
-### 4. Solving the "Black Box" Problem
+### 4. Handling Dynamic App State (Runtime Variables)
+Since users often choose their own configurations (e.g., custom shard counts or thresholds in SSS), the tool doesn't just generate static text.
+- **Placeholder Generation**: The Synthesis Tool identifies variables in the code and generates Markdown with placeholders: *"You chose to split your secret into **{{shardCount}}** shards."*
+- **Runtime Injection**: At query time, the developer passes the "Live State" to the `DocentEngine`. The engine then merges these values into the retrieved documentation chunks before showing them to the user.
+- **Logic Explanation**: The LLM writes different "Narrative Branches" based on the variables (e.g., explaining the trade-offs of a high vs. low threshold).
+
+### 5. Solving the "Black Box" Problem
 Developers need to trust what the AI writes.
 - **Proofreading Folder**: Generated `.md` files are saved to a visible `DocentDocs/Generated/` folder.
 - **Human Override**: If a developer manually edits a generated file, the tool respects the manual changes (using file hashing to track "Human-vetted" status).
@@ -28,11 +34,11 @@ Developers need to trust what the AI writes.
 
 | Step | Action | Outcome |
 |---|---|---|
-| **Code** | Dev writes a struct with a `@Docent` tag. | No manual docs required. |
-| **Build** | Plugin triggers `docent-synthesizer`. | Code is parsed; context sent to Local LLM. |
-| **Synthesis** | AI generates `FeatureName.md`. | Facts from code are woven into human text. |
-| **Indexing** | `docent-compiler` (SQLite/Accelerate) runs. | Docs are vectorized into the app bundle. |
-| **Runtime** | User asks "How many friends do I need?" | Docent answers using the docs the code wrote. |
+| **Code** | Dev writes a struct with a `@Docent` tag and dynamic variables. | No manual docs required. |
+| **Build** | Plugin triggers `docent-synthesizer`. | Code is parsed; placeholders like `{{threshold}}` are created. |
+| **Synthesis** | AI generates a dynamic `SSS.md` template. | Conceptual logic is written with variable slots. |
+| **Indexing** | `docent-compiler` (SQLite/Accelerate) runs. | Templates are vectorized into the app bundle. |
+| **Runtime** | User asks "What is my threshold?" | Engine merges live app state into the template and answers. |
 
 ## Roadmap Position
 Targeted for **v1.5** or **v2.0**. This feature serves as the primary differentiator between Docent and every other help-desk SDK on the market.
