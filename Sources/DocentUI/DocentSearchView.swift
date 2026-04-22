@@ -6,6 +6,7 @@ public struct DocentSearch: View {
     let resource: String
     let bundle: Bundle
     let encryption: DocentEncryption
+    let configuration: DocentSearchConfiguration
     
     @State private var engine: DocentEngine?
     @State private var loadError: Error?
@@ -13,17 +14,19 @@ public struct DocentSearch: View {
     public init(
         resource: String = "Knowledge",
         bundle: Bundle = .main,
-        encryption: DocentEncryption = .none
+        encryption: DocentEncryption = .none,
+        configuration: DocentSearchConfiguration = .default
     ) {
         self.resource = resource
         self.bundle = bundle
         self.encryption = encryption
+        self.configuration = configuration
     }
     
     public var body: some View {
         Group {
             if let engine = engine {
-                DocentSearchView(engine: engine)
+                DocentSearchView(engine: engine, configuration: configuration)
             } else if let error = loadError {
                 VStack(spacing: 16) {
                     Image(systemName: "exclamationmark.triangle")
@@ -63,9 +66,11 @@ public struct DocentSearchView: View {
     @State private var isSearching = false
     
     private let engine: DocentEngine
+    private let configuration: DocentSearchConfiguration
     
-    public init(engine: DocentEngine) {
+    public init(engine: DocentEngine, configuration: DocentSearchConfiguration = .default) {
         self.engine = engine
+        self.configuration = configuration
     }
     
     public var body: some View {
@@ -114,7 +119,7 @@ public struct DocentSearchView: View {
         isSearching = true
         Task {
             do {
-                let searchResults = try await engine.query(query)
+                let searchResults = try await engine.query(query, configuration: configuration)
                 await MainActor.run {
                     self.results = searchResults
                     self.isSearching = false

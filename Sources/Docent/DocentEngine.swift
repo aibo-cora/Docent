@@ -3,6 +3,43 @@ import NaturalLanguage
 import Accelerate
 import SQLite3
 
+public struct DocentSearchConfiguration: Sendable {
+    /// How much weight to give the title/breadcrumb match (0.0 to 1.0)
+    public var titleWeight: Float
+    /// How much weight to give the body content match (0.0 to 1.0)
+    public var bodyWeight: Float
+    /// Maximum number of results to return
+    public var topK: Int
+    /// Score threshold for "High" confidence
+    public var highThreshold: Double
+    /// Score threshold for "Medium" confidence
+    public var mediumThreshold: Double
+    /// Minimum score required to show a result at all
+    public var silenceThreshold: Double
+    /// Optional tags to filter the search by
+    public var filterTags: [String]?
+    
+    public init(
+        titleWeight: Float = 0.7,
+        bodyWeight: Float = 0.3,
+        topK: Int = 5,
+        highThreshold: Double = 0.82,
+        mediumThreshold: Double = 0.60,
+        silenceThreshold: Double = 0.35,
+        filterTags: [String]? = nil
+    ) {
+        self.titleWeight = titleWeight
+        self.bodyWeight = bodyWeight
+        self.topK = topK
+        self.highThreshold = highThreshold
+        self.mediumThreshold = mediumThreshold
+        self.silenceThreshold = silenceThreshold
+        self.filterTags = filterTags
+    }
+    
+    public static let `default` = DocentSearchConfiguration()
+}
+
 public struct DocentChunk: Identifiable, Sendable {
     public let id: Int64
     public let title: String
@@ -33,13 +70,12 @@ public struct DocentResult: Identifiable, Sendable {
         case high, medium, low
     }
     
-    public init(chunk: DocentChunk, score: Double) {
+    public init(chunk: DocentChunk, score: Double, config: DocentSearchConfiguration = .default) {
         self.chunk = chunk
         self.score = score
         
-        // Restore stricter confidence for v1.0 (with Title Boosting)
-        if score > 0.82 { self.confidence = .high }
-        else if score > 0.65 { self.confidence = .medium }
+        if score >= config.highThreshold { self.confidence = .high }
+        else if score >= config.mediumThreshold { self.confidence = .medium }
         else { self.confidence = .low }
     }
 }
@@ -77,7 +113,7 @@ public actor DocentEngine {
         }
     }
     
-    public func query(_ text: String, topK: Int = 3) async throws -> [DocentResult] {
+    public func query(_ text: String, configuration: DocentSearchConfiguration = .default) async throws -> [DocentResult] {
         guard let embedding = embedding, let queryVector = embedding.vector(for: text) else {
             return []
         }
@@ -91,21 +127,26 @@ public actor DocentEngine {
         for (chunkId, (titleVector, bodyVector)) in vectors {
             guard let chunk = chunks[chunkId] else { continue }
             
-            // Compare query against both Title and Body
+            // 1. Apply Tag Filtering
+            if let filterTags = configuration.filterTags, !filterTags.isEmpty {
+                let hasMatch = filterTags.contains { tag in chunk.tags.contains(tag) }
+                if !hasMatch { continue }
+            }
+            
+            // 2. Multi-Vector Scoring
             let titleScore = cosineSimilarity(queryFloatVector, titleVector)
             let bodyScore = cosineSimilarity(queryFloatVector, bodyVector)
             
-            // Weighted average: Title match is usually what user wants
-            // 70% Title match, 30% Body match
-            let weightedScore = (titleScore * 0.7) + (bodyScore * 0.3)
-            
-            // Apply priority multiplier
+            let weightedScore = (titleScore * configuration.titleWeight) + (bodyScore * configuration.bodyWeight)
             let finalScore = weightedScore * Float(chunk.priority)
             
-            results.append(DocentResult(chunk: chunk, score: Double(min(finalScore, 1.0))))
+            // 3. Silence Threshold
+            if Double(finalScore) < configuration.silenceThreshold { continue }
+            
+            results.append(DocentResult(chunk: chunk, score: Double(min(finalScore, 1.0)), config: configuration))
         }
         
-        return results.sorted(by: { $0.score > $1.score }).prefix(topK).map { $0 }
+        return results.sorted(by: { $0.score > $1.score }).prefix(configuration.topK).map { $0 }
     }
     
     private func loadAllChunks() throws -> [Int64: DocentChunk] {
