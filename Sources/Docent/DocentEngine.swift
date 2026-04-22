@@ -37,9 +37,9 @@ public struct DocentResult: Identifiable, Sendable {
         self.chunk = chunk
         self.score = score
         
-        // Simple confidence normalization
-        if score > 0.85 { self.confidence = .high }
-        else if score > 0.70 { self.confidence = .medium }
+        // Refined confidence normalization for NLEmbedding
+        if score > 0.75 { self.confidence = .high }
+        else if score > 0.55 { self.confidence = .medium }
         else { self.confidence = .low }
     }
 }
@@ -87,12 +87,24 @@ public actor DocentEngine {
         let vectors = try loadAllVectors()
         
         var results: [DocentResult] = []
+        let queryLower = text.lowercased()
         
         for (chunkId, vector) in vectors {
             guard let chunk = chunks[chunkId] else { continue }
-            let score = cosineSimilarity(queryFloatVector, vector)
-            // Apply priority boost
-            let finalScore = score * Float(chunk.priority)
+            let baseScore = cosineSimilarity(queryFloatVector, vector)
+            
+            // 1. Apply priority boost
+            var finalScore = baseScore * Float(chunk.priority)
+            
+            // 2. Apply Title Match boost (if query is in title/breadcrumb)
+            if chunk.title.lowercased().contains(queryLower) || 
+               chunk.breadcrumb.lowercased().contains(queryLower) {
+                finalScore += 0.15 // Bonus for keyword match in title
+            }
+            
+            // Cap at 1.0 (though cosine similarity + boost might exceed it)
+            finalScore = min(finalScore, 1.0)
+            
             results.append(DocentResult(chunk: chunk, score: Double(finalScore)))
         }
         
@@ -117,7 +129,8 @@ public actor DocentEngine {
             let encryptionType = sqlite3_column_int(stmt, 5)
             let priority = sqlite3_column_double(stmt, 6)
             
-            let tagsString = sqlite3_column_text(stmt, 7) != nil ? String(cString: sqlite3_column_text(stmt, 7)) : ""
+            let tagsPtr = sqlite3_column_text(stmt, 7)
+            let tagsString = tagsPtr != nil ? String(cString: tagsPtr!) : ""
             let tags = tagsString.components(separatedBy: ",").map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
             
             if encryptionType == 2, let service = encryptionService {
