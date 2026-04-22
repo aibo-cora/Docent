@@ -36,11 +36,9 @@ let package = Package(
             plugins: [.plugin(name: "DocentPlugin")]
         ),
         .plugin(
-
             name: "DocentPlugin",
             capability: .buildTool(),
-            dependencies: ["DocentCompiler"],
-            path: "Sources/DocentPlugin"
+            dependencies: ["DocentCompiler"]
         ),
         .testTarget(
             name: "DocentTests",

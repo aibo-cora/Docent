@@ -1,21 +1,43 @@
 import PackagePlugin
 import Foundation
+#if canImport(XcodeProjectPlugin)
+import XcodeProjectPlugin
+#endif
 
 @main
 struct DocentPlugin: BuildToolPlugin {
     func createBuildCommands(context: PluginContext, target: Target) async throws -> [Command] {
-        // We look for a "DocentDocs" folder in the target's directory
-        let docsPath = target.directory.appending("DocentDocs")
+        return try buildCommands(
+            inputDirectory: target.directory,
+            outputDirectory: context.pluginWorkDirectory,
+            toolPath: try context.tool(named: "DocentCompiler").path
+        )
+    }
+}
+
+#if canImport(XcodeProjectPlugin)
+extension DocentPlugin: XcodeBuildToolPlugin {
+    func createBuildCommands(context: XcodePluginContext, target: XcodeTarget) async throws -> [Command] {
+        return try buildCommands(
+            inputDirectory: context.xcodeProject.directory,
+            outputDirectory: context.pluginWorkDirectory,
+            toolPath: try context.tool(named: "DocentCompiler").path
+        )
+    }
+}
+#endif
+
+extension DocentPlugin {
+    func buildCommands(inputDirectory: Path, outputDirectory: Path, toolPath: Path) throws -> [Command] {
+        // We look for a "DocentDocs" folder in the provided directory
+        let docsPath = inputDirectory.appending("DocentDocs")
         let fileManager = FileManager.default
         
-        // If the folder doesn't exist, we skip but emit a diagnostic
+        // If the folder doesn't exist, we skip
         guard fileManager.fileExists(atPath: docsPath.string) else {
-            // Note: Diagnostics should be emitted via context.diagnostics if available, 
-            // but print() usually works for build tools.
             return []
         }
         
-        let outputDirectory = context.pluginWorkDirectory
         let outputFile = outputDirectory.appending("Knowledge.docent")
         
         // Find all .md files in the DocentDocs folder
@@ -38,7 +60,7 @@ struct DocentPlugin: BuildToolPlugin {
         return [
             .buildCommand(
                 displayName: "Compiling Docent Knowledge Base",
-                executable: try context.tool(named: "DocentCompiler").path,
+                executable: toolPath,
                 arguments: [
                     docsPath.string,
                     outputFile.string
