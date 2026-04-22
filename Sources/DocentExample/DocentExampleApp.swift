@@ -2,6 +2,7 @@ import SwiftUI
 import Docent
 import DocentUI
 
+@main
 struct DocentExampleApp: App {
     var body: some Scene {
         WindowGroup {
@@ -40,5 +41,3 @@ struct ContentView: View {
         }
     }
 }
-
-DocentExampleApp.main()
