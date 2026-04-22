@@ -8,10 +8,10 @@ import XcodeProjectPlugin
 struct DocentPlugin: BuildToolPlugin {
     func createBuildCommands(context: PluginContext, target: Target) async throws -> [Command] {
         return try buildCommands(
-            inputDirectory: target.directory,
-            outputDirectory: context.pluginWorkDirectory,
-            toolPath: try context.tool(named: "DocentCompiler").path,
-            inputFiles: (target as? SourceModuleTarget)?.sourceFiles.map { $0.path } ?? []
+            inputDirectory: target.directoryURL,
+            outputDirectory: context.pluginWorkDirectoryURL,
+            toolURL: try context.tool(named: "DocentCompiler").url,
+            inputFiles: (target as? SourceModuleTarget)?.sourceFiles.map { $0.url } ?? []
         )
     }
 }
@@ -20,66 +20,60 @@ struct DocentPlugin: BuildToolPlugin {
 extension DocentPlugin: XcodeBuildToolPlugin {
     func createBuildCommands(context: XcodePluginContext, target: XcodeTarget) throws -> [Command] {
         return try buildCommands(
-            inputDirectory: context.xcodeProject.directory,
-            outputDirectory: context.pluginWorkDirectory,
-            toolPath: try context.tool(named: "DocentCompiler").path,
-            inputFiles: target.inputFiles.map { $0.path }
+            inputDirectory: context.xcodeProject.directoryURL,
+            outputDirectory: context.pluginWorkDirectoryURL,
+            toolURL: try context.tool(named: "DocentCompiler").url,
+            inputFiles: target.inputFiles.map { $0.url }
         )
     }
 }
 #endif
 
 extension DocentPlugin {
-    func buildCommands(inputDirectory: Path, outputDirectory: Path, toolPath: Path, inputFiles: [Path]) throws -> [Command] {
+    func buildCommands(inputDirectory: URL, outputDirectory: URL, toolURL: URL, inputFiles: [URL]) throws -> [Command] {
         let fileManager = FileManager.default
         
         // 1. Try to find the DocentDocs directory by scanning input files
-        // This handles cases where DocentDocs is nested deep in the project
-        var docsPath: Path? = nil
+        var docsURL: URL? = nil
         
-        for file in inputFiles {
-            if file.lastComponent.lowercased() == "docentdocs" {
-                docsPath = file
+        for fileURL in inputFiles {
+            if fileURL.lastPathComponent.lowercased() == "docentdocs" {
+                docsURL = fileURL
                 break
             }
-            // Also check if any .md file is inside a DocentDocs folder
-            if file.extension?.lowercased() == "md" {
-                var current = file
-                while current.string.count > inputDirectory.string.count {
-                    current = current.removingLastComponent()
-                    if current.lastComponent.lowercased() == "docentdocs" {
-                        docsPath = current
+            if fileURL.pathExtension.lowercased() == "md" {
+                var current = fileURL
+                while current.path.count > inputDirectory.path.count {
+                    current = current.deletingLastPathComponent()
+                    if current.lastPathComponent.lowercased() == "docentdocs" {
+                        docsURL = current
                         break
                     }
                 }
             }
-            if docsPath != nil { break }
+            if docsURL != nil { break }
         }
         
-        // Fallback to the old method if discovery failed
-        if docsPath == nil {
-            let candidate = inputDirectory.appending("DocentDocs")
-            if fileManager.fileExists(atPath: candidate.string) {
-                docsPath = candidate
+        // Fallback
+        if docsURL == nil {
+            let candidate = inputDirectory.appendingPathComponent("DocentDocs")
+            if fileManager.fileExists(atPath: candidate.path) {
+                docsURL = candidate
             }
         }
         
-        guard let finalDocsPath = docsPath else {
-            // We return empty here because we don't want to break the build, 
-            // but the user will see that Knowledge.docent is missing at runtime.
+        guard let finalDocsURL = docsURL else {
             return []
         }
         
-        let outputFile = outputDirectory.appending("Knowledge.docent")
+        let outputFileURL = outputDirectory.appendingPathComponent("Knowledge.docent")
         
         // 2. Find all .md files for incremental tracking
-        var markdownFiles: [Path] = []
-        let docsURL = URL(fileURLWithPath: finalDocsPath.string)
-        
-        if let enumerator = fileManager.enumerator(at: docsURL, includingPropertiesForKeys: [.isRegularFileKey], options: [.skipsHiddenFiles]) {
+        var markdownFiles: [URL] = []
+        if let enumerator = fileManager.enumerator(at: finalDocsURL, includingPropertiesForKeys: [.isRegularFileKey], options: [.skipsHiddenFiles]) {
             while let fileURL = enumerator.nextObject() as? URL {
                 if fileURL.pathExtension.lowercased() == "md" {
-                    markdownFiles.append(Path(fileURL.path))
+                    markdownFiles.append(fileURL)
                 }
             }
         }
@@ -88,14 +82,14 @@ extension DocentPlugin {
         
         return [
             .buildCommand(
-                displayName: "Compiling Docent Knowledge Base from \(finalDocsPath.lastComponent)",
-                executable: toolPath,
+                displayName: "Compiling Docent Knowledge Base from \(finalDocsURL.lastPathComponent)",
+                executable: toolURL,
                 arguments: [
-                    finalDocsPath.string,
-                    outputFile.string
+                    finalDocsURL.path,
+                    outputFileURL.path
                 ],
                 inputFiles: markdownFiles,
-                outputFiles: [outputFile]
+                outputFiles: [outputFileURL]
             )
         ]
     }

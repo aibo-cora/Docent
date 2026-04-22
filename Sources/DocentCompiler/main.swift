@@ -23,7 +23,7 @@ struct DocentCompilerMain {
         print("📁 Input: \(inputFolder)")
         print("📄 Output: \(outputFile)")
         
-        if let key = encryptionKey {
+        if encryptionKey != nil {
             print("🔐 Encryption: Enabled (CryptoKit)")
         }
         
@@ -276,7 +276,7 @@ class Compiler {
         sqlite3_bind_text(chunkStmt, 2, (chunk.title as NSString).utf8String, -1, nil)
         sqlite3_bind_text(chunkStmt, 3, (chunk.breadcrumb as NSString).utf8String, -1, nil)
         
-        contentData.withUnsafeBytes { buf in
+        _ = contentData.withUnsafeBytes { buf in
             sqlite3_bind_blob(chunkStmt, 4, buf.baseAddress, Int32(contentData.count), nil)
         }
         sqlite3_bind_int(chunkStmt, 5, Int32(encryptionType))
@@ -300,7 +300,7 @@ class Compiler {
         let vectorStmt = try db.prepare(sql: vectorSql)
         
         sqlite3_bind_int64(vectorStmt, 1, chunkId)
-        vectorData.withUnsafeBytes { buf in
+        _ = vectorData.withUnsafeBytes { buf in
             sqlite3_bind_blob(vectorStmt, 2, buf.baseAddress, Int32(vectorData.count), nil)
         }
         sqlite3_bind_int(vectorStmt, 3, Int32(floatVector.count))
