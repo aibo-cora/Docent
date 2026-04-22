@@ -37,9 +37,9 @@ public struct DocentResult: Identifiable, Sendable {
         self.chunk = chunk
         self.score = score
         
-        // Refined confidence normalization for NLEmbedding
-        if score > 0.75 { self.confidence = .high }
-        else if score > 0.55 { self.confidence = .medium }
+        // Restore stricter confidence for v1.0 (with Title Boosting)
+        if score > 0.82 { self.confidence = .high }
+        else if score > 0.65 { self.confidence = .medium }
         else { self.confidence = .low }
     }
 }
@@ -87,25 +87,22 @@ public actor DocentEngine {
         let vectors = try loadAllVectors()
         
         var results: [DocentResult] = []
-        let queryLower = text.lowercased()
         
-        for (chunkId, vector) in vectors {
+        for (chunkId, (titleVector, bodyVector)) in vectors {
             guard let chunk = chunks[chunkId] else { continue }
-            let baseScore = cosineSimilarity(queryFloatVector, vector)
             
-            // 1. Apply priority boost
-            var finalScore = baseScore * Float(chunk.priority)
+            // Compare query against both Title and Body
+            let titleScore = cosineSimilarity(queryFloatVector, titleVector)
+            let bodyScore = cosineSimilarity(queryFloatVector, bodyVector)
             
-            // 2. Apply Title Match boost (if query is in title/breadcrumb)
-            if chunk.title.lowercased().contains(queryLower) || 
-               chunk.breadcrumb.lowercased().contains(queryLower) {
-                finalScore += 0.15 // Bonus for keyword match in title
-            }
+            // Weighted average: Title match is usually what user wants
+            // 70% Title match, 30% Body match
+            let weightedScore = (titleScore * 0.7) + (bodyScore * 0.3)
             
-            // Cap at 1.0 (though cosine similarity + boost might exceed it)
-            finalScore = min(finalScore, 1.0)
+            // Apply priority multiplier
+            let finalScore = weightedScore * Float(chunk.priority)
             
-            results.append(DocentResult(chunk: chunk, score: Double(finalScore)))
+            results.append(DocentResult(chunk: chunk, score: Double(min(finalScore, 1.0))))
         }
         
         return results.sorted(by: { $0.score > $1.score }).prefix(topK).map { $0 }
@@ -144,10 +141,10 @@ public actor DocentEngine {
         return chunks
     }
     
-    private func loadAllVectors() throws -> [Int64: [Float]] {
-        var vectors: [Int64: [Float]] = [:]
+    private func loadAllVectors() throws -> [Int64: (title: [Float], body: [Float])] {
+        var vectors: [Int64: (title: [Float], body: [Float])] = [:]
         let sql = """
-            SELECT v.chunk_id, v.vector, v.dimensions, c.encryption_type 
+            SELECT v.chunk_id, v.title_vector, v.body_vector, v.dimensions, c.encryption_type 
             FROM docent_vectors v
             JOIN docent_chunks c ON v.chunk_id = c.id;
         """
@@ -155,23 +152,28 @@ public actor DocentEngine {
         
         while sqlite3_step(stmt) == SQLITE_ROW {
             let chunkId = sqlite3_column_int64(stmt, 0)
-            let vectorPtr = sqlite3_column_blob(stmt, 1)
-            let vectorLen = sqlite3_column_bytes(stmt, 1)
-            var vectorData = Data(bytes: vectorPtr!, count: Int(vectorLen))
+            let dimensions = sqlite3_column_int(stmt, 3)
+            let encryptionType = sqlite3_column_int(stmt, 4)
             
-            let dimensions = sqlite3_column_int(stmt, 2)
-            let encryptionType = sqlite3_column_int(stmt, 3)
-            
-            if encryptionType == 2, let service = encryptionService {
-                vectorData = try service.decrypt(combinedData: vectorData)
+            func getVector(at index: Int32) throws -> [Float] {
+                let ptr = sqlite3_column_blob(stmt, index)
+                let len = sqlite3_column_bytes(stmt, index)
+                var data = Data(bytes: ptr!, count: Int(len))
+                
+                if encryptionType == 2, let service = encryptionService {
+                    data = try service.decrypt(combinedData: data)
+                }
+                
+                return data.withUnsafeBytes { buffer in
+                    let floatPtr = buffer.baseAddress!.assumingMemoryBound(to: Float.self)
+                    return Array(UnsafeBufferPointer(start: floatPtr, count: Int(dimensions)))
+                }
             }
             
-            let vector: [Float] = vectorData.withUnsafeBytes { buffer in
-                let floatPtr = buffer.baseAddress!.assumingMemoryBound(to: Float.self)
-                return Array(UnsafeBufferPointer(start: floatPtr, count: Int(dimensions)))
-            }
+            let titleVector = try getVector(at: 1)
+            let bodyVector = try getVector(at: 2)
             
-            vectors[chunkId] = vector
+            vectors[chunkId] = (title: titleVector, body: bodyVector)
         }
         store.finalize(stmt)
         return vectors
