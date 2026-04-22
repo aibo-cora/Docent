@@ -73,6 +73,34 @@ for result in results {
 }
 ```
 
+## DocentUI (SwiftUI)
+
+Docent provides native SwiftUI components to build a search interface in seconds.
+
+### DocentSearchView
+The quickest way to add search to your app:
+
+```swift
+import Docent
+import DocentUI
+
+struct HelpView: View {
+    let engine: DocentEngine
+    
+    var body: some View {
+        DocentSearchView(engine: engine)
+    }
+}
+```
+
+## Example App
+
+A complete example app is included in the repository under `Sources/DocentExample`. To run it:
+
+1. Clone the repo.
+2. Run `swift run DocentExample` (on macOS).
+3. Or open in Xcode and run the `DocentExample` scheme.
+
 ## Markdown & Metadata Guide
 
 To get the best search results, Docent supports [YAML Frontmatter](https://assemble.io/docs/YAML-front-matter.html) and hierarchical [Markdown](https://www.markdownguide.org/basic-syntax/) structures.

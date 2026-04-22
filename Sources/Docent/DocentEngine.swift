@@ -3,7 +3,7 @@ import NaturalLanguage
 import Accelerate
 import SQLite3
 
-public struct DocentChunk: Identifiable {
+public struct DocentChunk: Identifiable, Sendable {
     public let id: Int64
     public let title: String
     public let breadcrumb: String
@@ -23,13 +23,13 @@ public struct DocentChunk: Identifiable {
     }
 }
 
-public struct DocentResult: Identifiable {
+public struct DocentResult: Identifiable, Sendable {
     public var id: Int64 { chunk.id }
     public let chunk: DocentChunk
     public let score: Double
     public let confidence: Confidence
     
-    public enum Confidence: String {
+    public enum Confidence: String, Sendable {
         case high, medium, low
     }
     
@@ -49,7 +49,7 @@ public enum DocentEncryption {
     case cryptoKit(key: String)
 }
 
-public class DocentEngine {
+public actor DocentEngine {
     private let embedding: NLEmbedding?
     private let store: SQLiteStore
     private var encryptionService: EncryptionService?
