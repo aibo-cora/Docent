@@ -17,7 +17,7 @@ struct DocentPlugin: BuildToolPlugin {
 
 #if canImport(XcodeProjectPlugin)
 extension DocentPlugin: XcodeBuildToolPlugin {
-    func createBuildCommands(context: XcodePluginContext, target: XcodeTarget) async throws -> [Command] {
+    func createBuildCommands(context: XcodePluginContext, target: XcodeTarget) throws -> [Command] {
         return try buildCommands(
             inputDirectory: context.xcodeProject.directory,
             outputDirectory: context.pluginWorkDirectory,
