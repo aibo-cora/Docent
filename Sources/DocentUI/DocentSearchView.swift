@@ -1,6 +1,62 @@
 import SwiftUI
 import Docent
 
+/// A managed search view that handles the lifecycle of the DocentEngine internally.
+public struct DocentSearch: View {
+    let resource: String
+    let bundle: Bundle
+    let encryption: DocentEncryption
+    
+    @State private var engine: DocentEngine?
+    @State private var loadError: Error?
+    
+    public init(
+        resource: String = "Knowledge",
+        bundle: Bundle = .main,
+        encryption: DocentEncryption = .none
+    ) {
+        self.resource = resource
+        self.bundle = bundle
+        self.encryption = encryption
+    }
+    
+    public var body: some View {
+        Group {
+            if let engine = engine {
+                DocentSearchView(engine: engine)
+            } else if let error = loadError {
+                VStack(spacing: 16) {
+                    Image(systemName: "exclamationmark.triangle")
+                        .font(.system(size: 48))
+                        .foregroundColor(.secondary)
+                    Text("Knowledge Base Error")
+                        .font(.headline)
+                    Text(error.localizedDescription)
+                        .font(.subheadline)
+                        .foregroundColor(.secondary)
+                        .multilineTextAlignment(.center)
+                }
+                .padding()
+            } else {
+                ProgressView("Loading intelligence...")
+                    .task {
+                        await loadEngine()
+                    }
+            }
+        }
+    }
+    
+    private func loadEngine() async {
+        do {
+            let docentEngine = try DocentEngine(resource: resource, bundle: bundle, encryption: encryption)
+            self.engine = docentEngine
+        } catch {
+            self.loadError = error
+        }
+    }
+}
+
+/// The underlying search interface. Can be used directly for custom implementations.
 public struct DocentSearchView: View {
     @State private var searchText = ""
     @State private var results: [DocentResult] = []
@@ -16,9 +72,17 @@ public struct DocentSearchView: View {
         NavigationView {
             List {
                 if results.isEmpty && !searchText.isEmpty && !isSearching {
-                    Text("No results found.")
-                        .foregroundColor(.secondary)
-                        .listRowSeparator(.hidden)
+                    VStack(spacing: 8) {
+                        Image(systemName: "magnifyingglass")
+                            .font(.largeTitle)
+                            .foregroundColor(.secondary)
+                        Text("No results for '\(searchText)'")
+                            .font(.headline)
+                            .foregroundColor(.secondary)
+                    }
+                    .frame(maxWidth: .infinity, minHeight: 200)
+                    .listRowBackground(Color.clear)
+                    .listRowSeparator(.hidden)
                 } else {
                     ForEach(results) { result in
                         NavigationLink(destination: DocentDetailView(result: result)) {

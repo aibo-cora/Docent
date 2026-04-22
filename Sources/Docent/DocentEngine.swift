@@ -44,7 +44,7 @@ public struct DocentResult: Identifiable, Sendable {
     }
 }
 
-public enum DocentEncryption {
+public enum DocentEncryption: Sendable {
     case none
     case cryptoKit(key: String)
 }
