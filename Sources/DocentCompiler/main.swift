@@ -3,8 +3,7 @@ import NaturalLanguage
 import Docent
 import SQLite3
 
-@main
-struct DocentCompiler {
+struct DocentCompilerMain {
     static func main() async {
         let args = ProcessInfo.processInfo.arguments
         guard args.count >= 3 else {
@@ -23,6 +22,10 @@ struct DocentCompiler {
         print("🚀 Docent Compiler starting...")
         print("📁 Input: \(inputFolder)")
         print("📄 Output: \(outputFile)")
+        
+        if let key = encryptionKey {
+            print("🔐 Encryption: Enabled (CryptoKit)")
+        }
         
         do {
             let compiler = Compiler(inputPath: inputFolder, outputPath: outputFile, key: encryptionKey)
@@ -322,3 +325,5 @@ struct FileMetadata {
     var tags: String?
     var priority: Double = 1.0
 }
+
+await DocentCompilerMain.main()
