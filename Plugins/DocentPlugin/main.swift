@@ -36,6 +36,7 @@ extension DocentPlugin {
         // 1. Discovery/Auto-Creation logic
         var docsURL: URL? = nil
         
+        // Strategy A: Scan known input files (best for nested structures)
         for fileURL in inputFiles {
             if fileURL.lastPathComponent.lowercased() == "docentdocs" {
                 docsURL = fileURL
@@ -43,21 +44,35 @@ extension DocentPlugin {
             }
         }
         
+        // Strategy B: Check Target Root and subdirectories
         if docsURL == nil {
             let candidate = inputDirectory.appendingPathComponent("DocentDocs")
             if fileManager.fileExists(atPath: candidate.path) {
                 docsURL = candidate
             } else {
-                // AUTO-CREATION: Create the folder if it doesn't exist
-                print("info: Creating missing DocentDocs folder at \(candidate.path)")
-                try? fileManager.createDirectory(at: candidate, withIntermediateDirectories: true)
-                
-                // Create a sample file so the compiler has something to work with
-                let welcomeURL = candidate.appendingPathComponent("Welcome.md")
+                // Try one level deeper for standard Xcode project structures
+                let subCandidate = inputDirectory.appendingPathComponent(inputDirectory.lastPathComponent).appendingPathComponent("DocentDocs")
+                if fileManager.fileExists(atPath: subCandidate.path) {
+                    docsURL = subCandidate
+                }
+            }
+        }
+        
+        // Strategy C: AUTO-CREATION
+        if docsURL == nil {
+            // We default to creating it in the inputDirectory (Project Root)
+            let newDocsURL = inputDirectory.appendingPathComponent("DocentDocs")
+            
+            print("info: [Docent] Creating missing DocentDocs folder at \(newDocsURL.path)")
+            
+            do {
+                try fileManager.createDirectory(at: newDocsURL, withIntermediateDirectories: true)
+                let welcomeURL = newDocsURL.appendingPathComponent("Welcome.md")
                 let welcomeContent = "# Welcome to Docent\n\nAdd your own Markdown files to this folder to build your knowledge base."
-                try? welcomeContent.write(to: welcomeURL, atomically: true, encoding: .utf8)
-                
-                docsURL = candidate
+                try welcomeContent.write(to: welcomeURL, atomically: true, encoding: .utf8)
+                docsURL = newDocsURL
+            } catch {
+                print("warning: [Docent] Failed to create DocentDocs folder: \(error.localizedDescription)")
             }
         }
         
@@ -75,7 +90,6 @@ extension DocentPlugin {
             }
         }
         
-        // If still empty (e.g. creation failed or user deleted the sample), skip
         guard !markdownFiles.isEmpty else { return [] }
         
         return [
