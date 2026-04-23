@@ -94,7 +94,7 @@ public actor DocentEngine {
         self.embedding = NLEmbedding.sentenceEmbedding(for: .english)
         
         guard let path = bundle.path(forResource: resource, ofType: "docent") else {
-            throw DocentError.fileError("Could not find \(resource).docent in bundle")
+            throw DocentError.missingKnowledgeBase
         }
         
         self.store = try SQLiteStore(path: path)

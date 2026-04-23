@@ -24,12 +24,30 @@ public struct DocentSearch: View {
     }
     
     public var body: some View {
-        Group {
-            if let engine = engine {
-                DocentSearchView(engine: engine, configuration: configuration)
-            } else if let error = loadError {
+        if let engine = engine {
+            DocentSearchView(engine: engine, configuration: configuration)
+        } else if let error = loadError {
+            if let docentError = error as? DocentError, case .missingKnowledgeBase = docentError {
+                VStack(spacing: 20) {
+                    Image(systemName: "doc.text.magnifyingglass")
+                        .font(.system(size: 60))
+                        .foregroundColor(.accentColor)
+                    Text("No Knowledge Found")
+                        .font(.title2).bold()
+                    Text("To enable search, add your Markdown files to the **DocentDocs** folder in your project and rebuild your app.")
+                        .multilineTextAlignment(.center)
+                        .foregroundColor(.secondary)
+                        .padding(.horizontal)
+
+                    Text("Docent will automatically index your content during the build.")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
+                .padding()
+            } else {
                 VStack(spacing: 16) {
                     Image(systemName: "exclamationmark.triangle")
+        ...
                         .font(.system(size: 48))
                         .foregroundColor(.secondary)
                     Text("Knowledge Base Error")

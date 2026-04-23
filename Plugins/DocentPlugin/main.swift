@@ -33,7 +33,7 @@ extension DocentPlugin {
     func buildCommands(inputDirectory: URL, outputDirectory: URL, toolURL: URL, inputFiles: [URL]) throws -> [Command] {
         let fileManager = FileManager.default
         
-        // 1. Try to find the DocentDocs directory by scanning input files
+        // 1. Discovery/Auto-Creation logic
         var docsURL: URL? = nil
         
         for fileURL in inputFiles {
@@ -41,34 +41,31 @@ extension DocentPlugin {
                 docsURL = fileURL
                 break
             }
-            if fileURL.pathExtension.lowercased() == "md" {
-                var current = fileURL
-                while current.path.count > inputDirectory.path.count {
-                    current = current.deletingLastPathComponent()
-                    if current.lastPathComponent.lowercased() == "docentdocs" {
-                        docsURL = current
-                        break
-                    }
-                }
-            }
-            if docsURL != nil { break }
         }
         
-        // Fallback
         if docsURL == nil {
             let candidate = inputDirectory.appendingPathComponent("DocentDocs")
             if fileManager.fileExists(atPath: candidate.path) {
                 docsURL = candidate
+            } else {
+                // AUTO-CREATION: Create the folder if it doesn't exist
+                print("info: Creating missing DocentDocs folder at \(candidate.path)")
+                try? fileManager.createDirectory(at: candidate, withIntermediateDirectories: true)
+                
+                // Create a sample file so the compiler has something to work with
+                let welcomeURL = candidate.appendingPathComponent("Welcome.md")
+                let welcomeContent = "# Welcome to Docent\n\nAdd your own Markdown files to this folder to build your knowledge base."
+                try? welcomeContent.write(to: welcomeURL, atomically: true, encoding: .utf8)
+                
+                docsURL = candidate
             }
         }
         
-        guard let finalDocsURL = docsURL else {
-            return []
-        }
+        guard let finalDocsURL = docsURL else { return [] }
         
         let outputFileURL = outputDirectory.appendingPathComponent("Knowledge.docent")
         
-        // 2. Find all .md files for incremental tracking
+        // 2. Find all .md files
         var markdownFiles: [URL] = []
         if let enumerator = fileManager.enumerator(at: finalDocsURL, includingPropertiesForKeys: [.isRegularFileKey], options: [.skipsHiddenFiles]) {
             while let fileURL = enumerator.nextObject() as? URL {
@@ -78,6 +75,7 @@ extension DocentPlugin {
             }
         }
         
+        // If still empty (e.g. creation failed or user deleted the sample), skip
         guard !markdownFiles.isEmpty else { return [] }
         
         return [

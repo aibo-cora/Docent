@@ -47,6 +47,7 @@ public enum DocentError: Error, LocalizedError {
     case embeddingError(String)
     case encryptionError(String)
     case fileError(String)
+    case missingKnowledgeBase
 
     public var errorDescription: String? {
         switch self {
