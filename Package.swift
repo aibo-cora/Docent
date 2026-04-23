@@ -1,4 +1,4 @@
-// swift-tools-version: 6.0
+// swift-tools-version: 6.1
 import PackageDescription
 
 let package = Package(
@@ -6,7 +6,8 @@ let package = Package(
     platforms: [.macOS(.v13), .iOS(.v16)],
     products: [
         .library(name: "Docent", targets: ["Docent"]),
-        .executable(name: "docent-compiler", targets: ["DocentCompiler"]),
+        .library(name: "DocentUI", targets: ["DocentUI"]),
+        .executable(name: "DocentCompiler", targets: ["DocentCompiler"]),
         .plugin(name: "DocentPlugin", targets: ["DocentPlugin"])
     ],
     dependencies: [
@@ -18,16 +19,26 @@ let package = Package(
             dependencies: [],
             path: "Sources/Docent"
         ),
+        .target(
+            name: "DocentUI",
+            dependencies: ["Docent"],
+            path: "Sources/DocentUI"
+        ),
         .executableTarget(
             name: "DocentCompiler",
             dependencies: ["Docent"],
             path: "Sources/DocentCompiler"
         ),
+        .executableTarget(
+            name: "DocentExample",
+            dependencies: ["Docent", "DocentUI"],
+            path: "Sources/DocentExample",
+            plugins: [.plugin(name: "DocentPlugin")]
+        ),
         .plugin(
             name: "DocentPlugin",
             capability: .buildTool(),
-            dependencies: ["DocentCompiler"],
-            path: "Sources/DocentPlugin"
+            dependencies: ["DocentCompiler"]
         ),
         .testTarget(
             name: "DocentTests",

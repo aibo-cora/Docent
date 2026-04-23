@@ -3,7 +3,44 @@ import NaturalLanguage
 import Accelerate
 import SQLite3
 
-public struct DocentChunk: Identifiable {
+public struct DocentSearchConfiguration: Sendable {
+    /// How much weight to give the title/breadcrumb match (0.0 to 1.0)
+    public var titleWeight: Float
+    /// How much weight to give the body content match (0.0 to 1.0)
+    public var bodyWeight: Float
+    /// Maximum number of results to return
+    public var topK: Int
+    /// Score threshold for "High" confidence
+    public var highThreshold: Double
+    /// Score threshold for "Medium" confidence
+    public var mediumThreshold: Double
+    /// Minimum score required to show a result at all
+    public var silenceThreshold: Double
+    /// Optional tags to filter the search by
+    public var filterTags: [String]?
+    
+    public init(
+        titleWeight: Float = 0.7,
+        bodyWeight: Float = 0.3,
+        topK: Int = 5,
+        highThreshold: Double = 0.82,
+        mediumThreshold: Double = 0.60,
+        silenceThreshold: Double = 0.35,
+        filterTags: [String]? = nil
+    ) {
+        self.titleWeight = titleWeight
+        self.bodyWeight = bodyWeight
+        self.topK = topK
+        self.highThreshold = highThreshold
+        self.mediumThreshold = mediumThreshold
+        self.silenceThreshold = silenceThreshold
+        self.filterTags = filterTags
+    }
+    
+    public static let `default` = DocentSearchConfiguration()
+}
+
+public struct DocentChunk: Identifiable, Sendable {
     public let id: Int64
     public let title: String
     public let breadcrumb: String
@@ -23,33 +60,32 @@ public struct DocentChunk: Identifiable {
     }
 }
 
-public struct DocentResult: Identifiable {
+public struct DocentResult: Identifiable, Sendable {
     public var id: Int64 { chunk.id }
     public let chunk: DocentChunk
     public let score: Double
     public let confidence: Confidence
     
-    public enum Confidence: String {
+    public enum Confidence: String, Sendable {
         case high, medium, low
     }
     
-    public init(chunk: DocentChunk, score: Double) {
+    public init(chunk: DocentChunk, score: Double, config: DocentSearchConfiguration = .default) {
         self.chunk = chunk
         self.score = score
         
-        // Simple confidence normalization
-        if score > 0.85 { self.confidence = .high }
-        else if score > 0.70 { self.confidence = .medium }
+        if score >= config.highThreshold { self.confidence = .high }
+        else if score >= config.mediumThreshold { self.confidence = .medium }
         else { self.confidence = .low }
     }
 }
 
-public enum DocentEncryption {
+public enum DocentEncryption: Sendable {
     case none
     case cryptoKit(key: String)
 }
 
-public class DocentEngine {
+public actor DocentEngine {
     private let embedding: NLEmbedding?
     private let store: SQLiteStore
     private var encryptionService: EncryptionService?
@@ -58,7 +94,7 @@ public class DocentEngine {
         self.embedding = NLEmbedding.sentenceEmbedding(for: .english)
         
         guard let path = bundle.path(forResource: resource, ofType: "docent") else {
-            throw DocentError.fileError("Could not find \(resource).docent in bundle")
+            throw DocentError.missingKnowledgeBase
         }
         
         self.store = try SQLiteStore(path: path)
@@ -77,7 +113,7 @@ public class DocentEngine {
         }
     }
     
-    public func query(_ text: String, topK: Int = 3) async throws -> [DocentResult] {
+    public func query(_ text: String, configuration: DocentSearchConfiguration = .default) async throws -> [DocentResult] {
         guard let embedding = embedding, let queryVector = embedding.vector(for: text) else {
             return []
         }
@@ -88,15 +124,29 @@ public class DocentEngine {
         
         var results: [DocentResult] = []
         
-        for (chunkId, vector) in vectors {
+        for (chunkId, (titleVector, bodyVector)) in vectors {
             guard let chunk = chunks[chunkId] else { continue }
-            let score = cosineSimilarity(queryFloatVector, vector)
-            // Apply priority boost
-            let finalScore = score * Float(chunk.priority)
-            results.append(DocentResult(chunk: chunk, score: Double(finalScore)))
+            
+            // 1. Apply Tag Filtering
+            if let filterTags = configuration.filterTags, !filterTags.isEmpty {
+                let hasMatch = filterTags.contains { tag in chunk.tags.contains(tag) }
+                if !hasMatch { continue }
+            }
+            
+            // 2. Multi-Vector Scoring
+            let titleScore = cosineSimilarity(queryFloatVector, titleVector)
+            let bodyScore = cosineSimilarity(queryFloatVector, bodyVector)
+            
+            let weightedScore = (titleScore * configuration.titleWeight) + (bodyScore * configuration.bodyWeight)
+            let finalScore = weightedScore * Float(chunk.priority)
+            
+            // 3. Silence Threshold
+            if Double(finalScore) < configuration.silenceThreshold { continue }
+            
+            results.append(DocentResult(chunk: chunk, score: Double(min(finalScore, 1.0)), config: configuration))
         }
         
-        return results.sorted(by: { $0.score > $1.score }).prefix(topK).map { $0 }
+        return results.sorted(by: { $0.score > $1.score }).prefix(configuration.topK).map { $0 }
     }
     
     private func loadAllChunks() throws -> [Int64: DocentChunk] {
@@ -117,7 +167,8 @@ public class DocentEngine {
             let encryptionType = sqlite3_column_int(stmt, 5)
             let priority = sqlite3_column_double(stmt, 6)
             
-            let tagsString = sqlite3_column_text(stmt, 7) != nil ? String(cString: sqlite3_column_text(stmt, 7)) : ""
+            let tagsPtr = sqlite3_column_text(stmt, 7)
+            let tagsString = tagsPtr != nil ? String(cString: tagsPtr!) : ""
             let tags = tagsString.components(separatedBy: ",").map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
             
             if encryptionType == 2, let service = encryptionService {
@@ -131,10 +182,10 @@ public class DocentEngine {
         return chunks
     }
     
-    private func loadAllVectors() throws -> [Int64: [Float]] {
-        var vectors: [Int64: [Float]] = [:]
+    private func loadAllVectors() throws -> [Int64: (title: [Float], body: [Float])] {
+        var vectors: [Int64: (title: [Float], body: [Float])] = [:]
         let sql = """
-            SELECT v.chunk_id, v.vector, v.dimensions, c.encryption_type 
+            SELECT v.chunk_id, v.title_vector, v.body_vector, v.dimensions, c.encryption_type 
             FROM docent_vectors v
             JOIN docent_chunks c ON v.chunk_id = c.id;
         """
@@ -142,23 +193,28 @@ public class DocentEngine {
         
         while sqlite3_step(stmt) == SQLITE_ROW {
             let chunkId = sqlite3_column_int64(stmt, 0)
-            let vectorPtr = sqlite3_column_blob(stmt, 1)
-            let vectorLen = sqlite3_column_bytes(stmt, 1)
-            var vectorData = Data(bytes: vectorPtr!, count: Int(vectorLen))
+            let dimensions = sqlite3_column_int(stmt, 3)
+            let encryptionType = sqlite3_column_int(stmt, 4)
             
-            let dimensions = sqlite3_column_int(stmt, 2)
-            let encryptionType = sqlite3_column_int(stmt, 3)
-            
-            if encryptionType == 2, let service = encryptionService {
-                vectorData = try service.decrypt(combinedData: vectorData)
+            func getVector(at index: Int32) throws -> [Float] {
+                let ptr = sqlite3_column_blob(stmt, index)
+                let len = sqlite3_column_bytes(stmt, index)
+                var data = Data(bytes: ptr!, count: Int(len))
+                
+                if encryptionType == 2, let service = encryptionService {
+                    data = try service.decrypt(combinedData: data)
+                }
+                
+                return data.withUnsafeBytes { buffer in
+                    let floatPtr = buffer.baseAddress!.assumingMemoryBound(to: Float.self)
+                    return Array(UnsafeBufferPointer(start: floatPtr, count: Int(dimensions)))
+                }
             }
             
-            let vector: [Float] = vectorData.withUnsafeBytes { buffer in
-                let floatPtr = buffer.baseAddress!.assumingMemoryBound(to: Float.self)
-                return Array(UnsafeBufferPointer(start: floatPtr, count: Int(dimensions)))
-            }
+            let titleVector = try getVector(at: 1)
+            let bodyVector = try getVector(at: 2)
             
-            vectors[chunkId] = vector
+            vectors[chunkId] = (title: titleVector, body: bodyVector)
         }
         store.finalize(stmt)
         return vectors
