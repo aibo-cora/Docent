@@ -4,19 +4,12 @@ import Accelerate
 import SQLite3
 
 public struct DocentSearchConfiguration: Sendable {
-    /// How much weight to give the title/breadcrumb match (0.0 to 1.0)
     public var titleWeight: Float
-    /// How much weight to give the body content match (0.0 to 1.0)
     public var bodyWeight: Float
-    /// Maximum number of results to return
     public var topK: Int
-    /// Score threshold for "High" confidence
     public var highThreshold: Double
-    /// Score threshold for "Medium" confidence
     public var mediumThreshold: Double
-    /// Minimum score required to show a result at all
     public var silenceThreshold: Double
-    /// Optional tags to filter the search by
     public var filterTags: [String]?
     
     public init(
@@ -83,6 +76,7 @@ public struct DocentResult: Identifiable, Sendable {
 public enum DocentEncryption: Sendable {
     case none
     case cryptoKit(key: String)
+    case sqlCipher(passphrase: String)
 }
 
 public actor DocentEngine {
@@ -97,7 +91,12 @@ public actor DocentEngine {
             throw DocentError.missingKnowledgeBase
         }
         
-        self.store = try SQLiteStore(path: path)
+        var passphrase: String? = nil
+        if case .sqlCipher(let pass) = encryption {
+            passphrase = pass
+        }
+        
+        self.store = try SQLiteStore(path: path, passphrase: passphrase)
         
         if case .cryptoKit(let key) = encryption {
             self.encryptionService = try? EncryptionService(keyData: key.data(using: .utf8)!)
@@ -106,7 +105,13 @@ public actor DocentEngine {
 
     public init(path: String, encryption: DocentEncryption = .none) throws {
         self.embedding = NLEmbedding.sentenceEmbedding(for: .english)
-        self.store = try SQLiteStore(path: path)
+        
+        var passphrase: String? = nil
+        if case .sqlCipher(let pass) = encryption {
+            passphrase = pass
+        }
+        
+        self.store = try SQLiteStore(path: path, passphrase: passphrase)
         
         if case .cryptoKit(let key) = encryption {
             self.encryptionService = try? EncryptionService(keyData: key.data(using: .utf8)!)
@@ -127,20 +132,17 @@ public actor DocentEngine {
         for (chunkId, (titleVector, bodyVector)) in vectors {
             guard let chunk = chunks[chunkId] else { continue }
             
-            // 1. Apply Tag Filtering
             if let filterTags = configuration.filterTags, !filterTags.isEmpty {
                 let hasMatch = filterTags.contains { tag in chunk.tags.contains(tag) }
                 if !hasMatch { continue }
             }
             
-            // 2. Multi-Vector Scoring
             let titleScore = cosineSimilarity(queryFloatVector, titleVector)
             let bodyScore = cosineSimilarity(queryFloatVector, bodyVector)
             
             let weightedScore = (titleScore * configuration.titleWeight) + (bodyScore * configuration.bodyWeight)
             let finalScore = weightedScore * Float(chunk.priority)
             
-            // 3. Silence Threshold
             if Double(finalScore) < configuration.silenceThreshold { continue }
             
             results.append(DocentResult(chunk: chunk, score: Double(min(finalScore, 1.0)), config: configuration))
@@ -205,7 +207,7 @@ public actor DocentEngine {
                     data = try service.decrypt(combinedData: data)
                 }
                 
-                return data.withUnsafeBytes { buffer in
+                return data.withUnsafeBytes { buffer -> [Float] in
                     let floatPtr = buffer.baseAddress!.assumingMemoryBound(to: Float.self)
                     return Array(UnsafeBufferPointer(start: floatPtr, count: Int(dimensions)))
                 }

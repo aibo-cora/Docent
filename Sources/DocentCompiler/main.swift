@@ -7,7 +7,7 @@ struct DocentCompilerMain {
     static func main() async {
         let args = ProcessInfo.processInfo.arguments
         guard args.count >= 3 else {
-            print("Usage: docent-compiler <input_folder> <output_file> [--key <encryption_key>]")
+            print("Usage: docent-compiler <input_folder> <output_file> [--key <encryption_key>] [--password <db_passphrase>]")
             return
         }
         
@@ -18,6 +18,11 @@ struct DocentCompilerMain {
         if let keyIndex = args.firstIndex(of: "--key"), keyIndex + 1 < args.count {
             encryptionKey = args[keyIndex + 1]
         }
+        
+        var dbPassphrase: String?
+        if let passIndex = args.firstIndex(of: "--password"), passIndex + 1 < args.count {
+            dbPassphrase = args[passIndex + 1]
+        }
 
         print("🚀 Docent Compiler starting...")
         print("📁 Input: \(inputFolder)")
@@ -27,8 +32,12 @@ struct DocentCompilerMain {
             print("🔐 Encryption: Enabled (CryptoKit)")
         }
         
+        if dbPassphrase != nil {
+            print("🔐 Database Encryption: Enabled (SQLCipher)")
+        }
+        
         do {
-            let compiler = Compiler(inputPath: inputFolder, outputPath: outputFile, key: encryptionKey)
+            let compiler = Compiler(inputPath: inputFolder, outputPath: outputFile, key: encryptionKey, password: dbPassphrase)
             try await compiler.run()
             print("✅ Compilation complete!")
         } catch {
@@ -42,13 +51,15 @@ class Compiler {
     let inputPath: String
     let outputPath: String
     let encryptionKey: String?
+    let dbPassphrase: String?
     let embedding: NLEmbedding?
     private var encryptionService: EncryptionService?
 
-    init(inputPath: String, outputPath: String, key: String?) {
+    init(inputPath: String, outputPath: String, key: String?, password: String? = nil) {
         self.inputPath = inputPath
         self.outputPath = outputPath
         self.encryptionKey = key
+        self.dbPassphrase = password
         self.embedding = NLEmbedding.sentenceEmbedding(for: .english)
         
         if let key = key {
@@ -57,15 +68,13 @@ class Compiler {
     }
 
     func run() async throws {
-        // 1. Initialize SQLite
         if FileManager.default.fileExists(atPath: outputPath) {
             try FileManager.default.removeItem(atPath: outputPath)
         }
         
-        let db = try SQLiteStore(path: outputPath)
+        let db = try SQLiteStore(path: outputPath, passphrase: dbPassphrase)
         try createSchema(db)
 
-        // 2. Crawl and Process
         let mdFiles = try findMarkdownFiles(at: inputPath)
         print("Found \(mdFiles.count) Markdown files.")
 
@@ -73,7 +82,6 @@ class Compiler {
             try processFile(fileURL, db: db)
         }
 
-        // 3. Optimize
         print("Optimizing database...")
         try db.execute("PRAGMA journal_mode = DELETE;")
         try db.execute("VACUUM;")
@@ -83,7 +91,7 @@ class Compiler {
     private func createSchema(_ db: SQLiteStore) throws {
         try db.execute("""
             CREATE TABLE docent_info (key TEXT PRIMARY KEY, value TEXT);
-            INSERT INTO docent_info (key, value) VALUES ('version', '1.0.0');
+            INSERT INTO docent_info (key, value) VALUES ('version', '1.1.0');
             INSERT INTO docent_info (key, value) VALUES ('model', 'apple-nl-v1');
             
             CREATE TABLE docent_chunks (
@@ -243,7 +251,6 @@ class Compiler {
             throw DocentError.embeddingError("NLEmbedding unavailable")
         }
         
-        // DUAL EMBEDDING: Title and Body separately
         guard let titleVector = embedding.vector(for: chunk.breadcrumb),
               let bodyVector = embedding.vector(for: chunk.body) else {
             print("error: Failed to generate vectors for '\(chunk.title)'.")
@@ -291,7 +298,6 @@ class Compiler {
         let chunkId = db.lastInsertRowId()
         db.finalize(chunkStmt)
         
-        // Insert into docent_vectors
         let vectorSql = "INSERT INTO docent_vectors (chunk_id, title_vector, body_vector, dimensions) VALUES (?, ?, ?, ?);"
         let vectorStmt = try db.prepare(sql: vectorSql)
         
