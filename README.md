@@ -28,7 +28,7 @@ Add Docent to your `Package.swift`:
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/aibo-cora/Docent", from: "1.0.0")
+    .package(url: "https://github.com/aibo-cora/Docent", from: "1.1.0")
 ]
 ```
 
@@ -39,18 +39,7 @@ In your app target settings:
 2.  **Build Phases**: Add **DocentPlugin** to the "Run Build Tool Plugins" section.
 
 ### 3. Add Documentation Folder
-Create a folder named **`DocentDocs`** in your **project's root directory** (where your `.xcodeproj` or `Package.swift` lives).
-
-```text
-MyCoolApp/
-├── Sources/
-├── DocentDocs/             <-- Must be named exactly this
-│   ├── GettingStarted.md
-│   └── Security.md
-└── MyCoolApp.xcodeproj
-```
-
-**Note:** Ensure the `DocentDocs` folder is added to your Xcode project and its **Target Membership** is checked for your app target.
+Initialize your project to create the folder: `swift package docent-init` (or via Xcode menu).
 
 ---
 
@@ -70,26 +59,28 @@ struct HelpView: View {
 }
 ```
 
-### Custom Configuration
-You can fine-tune how Docent retrieves and presents results:
+### High-Precision Search
+Docent v1.1.0 uses **Dual-Vector Weighted Search**, which embeds your Titles and Body text separately to ensure that exact topic matches (like "deleting account") receive high confidence scores.
 
-```swift
-let config = DocentSearchConfiguration(
-    titleWeight: 0.8,        // 80% weight on title matches
-    bodyWeight: 0.2,         // 20% weight on content matches
-    topK: 3,                 // Show only top 3 results
-    silenceThreshold: 0.4,   // Hide results with score below 0.4
-    filterTags: ["pro"]      // Only search documents tagged with 'pro'
-)
+---
 
-DocentSearch(resource: "Knowledge", configuration: config)
-```
+## Security & Encryption
+
+Docent provides two tiers of on-device security:
+
+### Tier 1: CryptoKit (Default)
+Encrypts documentation text and vectors using AES-GCM. Zero impact on bundle size.
+- **Runtime:** `DocentSearch(resource: "Knowledge", encryption: .cryptoKit(key: "your-key"))`
+
+### Tier 2: SQLCipher (Full Database Encryption)
+Encrypts the entire `.docent` file at the page level. Adds ~2.5MB to bundle size.
+- **Dependency**: Link the `DocentSQLCipher` target.
+- **Runtime:** `DocentSearch(resource: "Knowledge", encryption: .sqlCipher(passphrase: "your-pass"))`
 
 ---
 
 ## Markdown & Metadata Guide
 
-### Frontmatter Support
 Define metadata at the top of your `.md` files to control the engine:
 
 ```markdown
@@ -104,31 +95,8 @@ This section explains our security model...
 ```
 
 - **title**: Overrides the filename in search results.
-- **tags**: Used for scoped searching (see `filterTags` in config).
+- **tags**: Used for scoped searching (see `DocentSearchConfiguration`).
 - **priority**: A multiplier (default 1.0) to "boost" important docs.
-
-### Hierarchical Chunking
-Docent automatically generates **Breadcrumbs** (e.g., `Setup > Step 1`) based on your `#`, `##`, and `###` headers. It also performs **Context Injection**, ensuring that sub-sections understand the full context of their parent headers.
-
----
-
-## Advanced Customization
-
-| Parameter | Default | Description |
-|---|---|---|
-| `titleWeight` | `0.7` | Influence of the title/breadcrumb on the final score. |
-| `bodyWeight` | `0.3` | Influence of the document body on the final score. |
-| `highThreshold` | `0.82` | Score required for "High" confidence badge. |
-| `mediumThreshold` | `0.60` | Score required for "Medium" confidence badge. |
-| `silenceThreshold` | `0.35` | Results scoring below this are hidden from the user. |
-
----
-
-## Security
-
-Docent supports **AES-GCM encryption** via Apple's `CryptoKit`. 
-- **Build-time:** Use the `--key` flag if running compiler manually, or configure via build settings.
-- **Runtime:** `DocentSearch(resource: "Knowledge", encryption: .cryptoKit(key: "your-key"))`
 
 ## License
 Docent is available under the MIT license. See the [LICENSE](LICENSE) file for more info.
