@@ -15,128 +15,120 @@ Instead of forcing users to scroll through static FAQs or leave your app for a s
 ## How It Works
 
 1. **Write:** You write your documentation in Markdown folders.
-2. **Compile:** The **DocentPlugin** runs during the Xcode build, invoking the compiler to chunk your Markdown and generate embeddings.
+2. **Compile:** The **DocentPlugin** runs during the Xcode build, invoking the compiler to chunk your Markdown and generate dual-vector embeddings (Title + Body).
 3. **Embed:** An optimized, read-only **SQLite** index (`.docent`) is packed into your app bundle.
 4. **Query:** At runtime, the **DocentEngine** uses the **Accelerate** framework to find relevant matches with near-zero latency.
 
-## Getting Started
+---
+
+## Installation & Setup
 
 ### 1. Add Dependency
 Add Docent to your `Package.swift`:
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/aibo-cora/Docent", from: "0.5.0")
+    .package(url: "https://github.com/aibo-cora/Docent", from: "1.0.0")
 ]
 ```
 
 ### 2. Configure Your Target
-Add the **DocentPlugin** and the **Docent** library to your app target:
+In your app target settings:
 
-```swift
-.target(
-    name: "MyCoolApp",
-    dependencies: ["Docent"],
-    plugins: [
-        .plugin(name: "DocentPlugin", package: "Docent")
-    ]
-)
-```
+1.  **Frameworks**: Add **Docent** and **DocentUI** to "Frameworks, Libraries, and Embedded Content."
+2.  **Build Phases**: Add **DocentPlugin** to the "Run Build Tool Plugins" section.
 
-### 3. Add Documentation
-Create a folder named `DocentDocs` in your target's directory and drop your `.md` files there.
+### 3. Add Documentation Folder
+Create a folder named **`DocentDocs`** in your **project's root directory** (where your `.xcodeproj` or `Package.swift` lives).
 
 ```text
 MyCoolApp/
 ├── Sources/
-└── DocentDocs/
-    ├── GettingStarted.md
-    └── Troubleshooting.md
+├── DocentDocs/             <-- Must be named exactly this
+│   ├── GettingStarted.md
+│   └── Security.md
+└── MyCoolApp.xcodeproj
 ```
+
+**Note:** Ensure the `DocentDocs` folder is added to your Xcode project and its **Target Membership** is checked for your app target.
+
+---
 
 ## Usage
 
-### Simple Query
-Initialize the engine and perform a semantic search:
+### One-Line Integration (SwiftUI)
+The easiest way to add search to your app is using the managed `DocentSearch` view:
 
 ```swift
-import Docent
+import SwiftUI
+import DocentUI
 
-let engine = try DocentEngine(resource: "Knowledge")
-
-let results = await engine.query("How do I reset my password?")
-
-for result in results {
-    print("Breadcrumb: \(result.chunk.breadcrumb)")
-    print("Content: \(result.chunk.text)")
-    print("Confidence: \(result.confidence)")
+struct HelpView: View {
+    var body: some View {
+        DocentSearch(resource: "Knowledge")
+    }
 }
 ```
 
+### Custom Configuration
+You can fine-tune how Docent retrieves and presents results:
+
+```swift
+let config = DocentSearchConfiguration(
+    titleWeight: 0.8,        // 80% weight on title matches
+    bodyWeight: 0.2,         // 20% weight on content matches
+    topK: 3,                 // Show only top 3 results
+    silenceThreshold: 0.4,   // Hide results with score below 0.4
+    filterTags: ["pro"]      // Only search documents tagged with 'pro'
+)
+
+DocentSearch(resource: "Knowledge", configuration: config)
+```
+
+---
+
 ## Markdown & Metadata Guide
 
-To get the best search results, Docent supports [YAML Frontmatter](https://assemble.io/docs/YAML-front-matter.html) and hierarchical [Markdown](https://www.markdownguide.org/basic-syntax/) structures.
-
 ### Frontmatter Support
-You can define metadata at the top of your `.md` files:
+Define metadata at the top of your `.md` files to control the engine:
 
 ```markdown
 ---
-title: Custom Page Title
-tags: account, security
+title: Advanced Encryption
+tags: security, pro
 priority: 1.5
 ---
 
-# Hierarchical Headers
-Docent respects your document structure.
+# Shamir Secret Sharing
+This section explains our security model...
 ```
 
-- **title**: Overrides the auto-detected title.
-- **tags**: comma-separated strings for future filtering.
-- **priority**: A score multiplier (default 1.0) to boost important documents.
+- **title**: Overrides the filename in search results.
+- **tags**: Used for scoped searching (see `filterTags` in config).
+- **priority**: A multiplier (default 1.0) to "boost" important docs.
 
 ### Hierarchical Chunking
-Docent automatically generates **Breadcrumbs** (e.g., `Setup > Step 1`) based on your header hierarchy (#, ##, ###). It also performs **Context Injection**, prepending parent titles to nested content to ensure the semantic search understands the full context of a sub-section.
+Docent automatically generates **Breadcrumbs** (e.g., `Setup > Step 1`) based on your `#`, `##`, and `###` headers. It also performs **Context Injection**, ensuring that sub-sections understand the full context of their parent headers.
 
-## Current Status: v0.6 — Parser Refinement (Functional)
+---
 
-The core toolchain is now functionally complete.
+## Advanced Customization
 
-- **Automated Pipeline:** Full SPM Build Tool Plugin integration.
-- **Optimized Storage:** SQLite-backed index with `VACUUM` and `ANALYZE` for high-speed read performance.
-- **Security:** Optional **CryptoKit (AES-GCM)** content encryption at rest.
-- **Validation:** 0.91 Precision@3 on technical documentation benchmarks.
-
-## Roadmap
-
-- [x] **v0.1 — Proof of Concept:** Validate `NLEmbedding` quality.
-- [x] **v0.5 — Private Alpha:** 
-    - [x] SPM Build Tool Plugin implementation.
-    - [x] SQLite binary format (`.docent`).
-    - [x] Headless `DocentEngine` runtime with Accelerate.
-    - [x] AES-GCM Content Encryption.
-- [ ] **v1.0 — Public Launch:** 
-    - `DocentUI`: Pre-built SwiftUI search and chat components.
-    - YAML Frontmatter support for priorities and tags.
-    - Incremental build support (caching unchanged chunks).
-
-## Technical Architecture
-
-| Component | Role | Technology |
+| Parameter | Default | Description |
 |---|---|---|
-| `DocentPlugin` | SPM build tool plugin | Swift, `PackagePlugin` |
-| `docent-compiler` | CLI build tool | Swift, `NaturalLanguage`, `SQLite3` |
-| `DocentEngine` | Runtime query API | Swift, `Accelerate`, `SQLite3` |
-| `.docent` format | Optimized index | SQLite (Encrypted via CryptoKit) |
+| `titleWeight` | `0.7` | Influence of the title/breadcrumb on the final score. |
+| `bodyWeight` | `0.3` | Influence of the document body on the final score. |
+| `highThreshold` | `0.82` | Score required for "High" confidence badge. |
+| `mediumThreshold` | `0.60` | Score required for "Medium" confidence badge. |
+| `silenceThreshold` | `0.35` | Results scoring below this are hidden from the user. |
+
+---
 
 ## Security
 
-Docent supports optional **AES-GCM encryption** via Apple's `CryptoKit`. 
-- **Build-time:** `docent-compiler --key <your-key>`
-- **Runtime:** `DocentEngine(resource: "Knowledge", encryption: .cryptoKit(key: "your-key"))`
-
-This protects your documentation text and vectors from being easily scraped from the app bundle while maintaining a tiny binary footprint.
+Docent supports **AES-GCM encryption** via Apple's `CryptoKit`. 
+- **Build-time:** Use the `--key` flag if running compiler manually, or configure via build settings.
+- **Runtime:** `DocentSearch(resource: "Knowledge", encryption: .cryptoKit(key: "your-key"))`
 
 ## License
-
 Docent is available under the MIT license. See the [LICENSE](LICENSE) file for more info.

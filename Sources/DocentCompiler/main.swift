@@ -3,8 +3,7 @@ import NaturalLanguage
 import Docent
 import SQLite3
 
-@main
-struct DocentCompiler {
+struct DocentCompilerMain {
     static func main() async {
         let args = ProcessInfo.processInfo.arguments
         guard args.count >= 3 else {
@@ -23,6 +22,10 @@ struct DocentCompiler {
         print("🚀 Docent Compiler starting...")
         print("📁 Input: \(inputFolder)")
         print("📄 Output: \(outputFile)")
+        
+        if encryptionKey != nil {
+            print("🔐 Encryption: Enabled (CryptoKit)")
+        }
         
         do {
             let compiler = Compiler(inputPath: inputFolder, outputPath: outputFile, key: encryptionKey)
@@ -80,7 +83,7 @@ class Compiler {
     private func createSchema(_ db: SQLiteStore) throws {
         try db.execute("""
             CREATE TABLE docent_info (key TEXT PRIMARY KEY, value TEXT);
-            INSERT INTO docent_info (key, value) VALUES ('version', '0.5.0');
+            INSERT INTO docent_info (key, value) VALUES ('version', '1.0.0');
             INSERT INTO docent_info (key, value) VALUES ('model', 'apple-nl-v1');
             
             CREATE TABLE docent_chunks (
@@ -97,7 +100,8 @@ class Compiler {
             
             CREATE TABLE docent_vectors (
                 chunk_id INTEGER PRIMARY KEY,
-                vector BLOB,
+                title_vector BLOB,
+                body_vector BLOB,
                 dimensions INTEGER,
                 FOREIGN KEY(chunk_id) REFERENCES docent_chunks(id)
             );
@@ -183,7 +187,6 @@ class Compiler {
             guard !currentBody.isEmpty, !headerStack.isEmpty else { return }
             let breadcrumb = headerStack.map { $0.title }.joined(separator: " > ")
             let title = headerStack.last!.title
-            // Context injection: Prepend breadcrumb to body for better embedding
             let contextBody = "\(breadcrumb): " + currentBody.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
             
             chunks.append(RawChunk(
@@ -202,10 +205,8 @@ class Compiler {
                 let level = trimmed.prefix(while: { $0 == "#" }).count
                 let title = trimmed.replacingOccurrences(of: String(repeating: "#", count: level), with: "").trimmingCharacters(in: .whitespaces)
                 
-                if level <= 3 { // We support up to ###
+                if level <= 3 {
                     createChunk()
-                    
-                    // Pop stack if new level is higher or equal
                     while let last = headerStack.last, last.level >= level {
                         headerStack.removeLast()
                     }
@@ -218,7 +219,6 @@ class Compiler {
         
         createChunk()
         
-        // If no headers were found, treat the whole file as one chunk
         if chunks.isEmpty && !currentBody.isEmpty {
             chunks.append(RawChunk(
                 title: fileMetadata.title ?? "General",
@@ -233,36 +233,35 @@ class Compiler {
     }
 
     private func insertChunk(_ chunk: RawChunk, relativePath: String, db: SQLiteStore) throws {
-        // Validate chunk
         if chunk.body.isEmpty {
-            print("warning: Skipping empty chunk in '\(relativePath)' with title '\(chunk.title)'")
+            print("warning: Skipping empty chunk in '\(relativePath)'")
             return
-        }
-        
-        // NLEmbedding has limits on sentence/paragraph length. 
-        // A rough limit for reliable embedding is ~2000 characters.
-        if chunk.body.count > 5000 {
-            print("warning: Chunk '\(chunk.title)' in '\(relativePath)' is very large (\(chunk.body.count) chars). Semantic search quality may decrease. Consider splitting with '##' headers.")
         }
 
         guard let embedding = embedding else {
-            print("error: NLEmbedding for English is not available on this system.")
+            print("error: NLEmbedding unavailable.")
             throw DocentError.embeddingError("NLEmbedding unavailable")
         }
         
-        guard let vector = embedding.vector(for: chunk.body) else {
-            print("error: Failed to generate embedding vector for chunk '\(chunk.title)' in '\(relativePath)'.")
+        // DUAL EMBEDDING: Title and Body separately
+        guard let titleVector = embedding.vector(for: chunk.breadcrumb),
+              let bodyVector = embedding.vector(for: chunk.body) else {
+            print("error: Failed to generate vectors for '\(chunk.title)'.")
             return 
         }
         
-        let floatVector = vector.map { Float32($0) }
-        var vectorData = Data(bytes: floatVector, count: floatVector.count * MemoryLayout<Float32>.size)
+        let titleFloatVector = titleVector.map { Float32($0) }
+        let bodyFloatVector = bodyVector.map { Float32($0) }
+        
+        var titleVectorData = titleFloatVector.withUnsafeBytes { Data($0) }
+        var bodyVectorData = bodyFloatVector.withUnsafeBytes { Data($0) }
         var contentData = chunk.body.data(using: .utf8)!
         var encryptionType = 0
 
         if let service = encryptionService {
             contentData = try service.encrypt(contentData)
-            vectorData = try service.encrypt(vectorData)
+            titleVectorData = try service.encrypt(titleVectorData)
+            bodyVectorData = try service.encrypt(bodyVectorData)
             encryptionType = 2
         }
         
@@ -273,7 +272,7 @@ class Compiler {
         sqlite3_bind_text(chunkStmt, 2, (chunk.title as NSString).utf8String, -1, nil)
         sqlite3_bind_text(chunkStmt, 3, (chunk.breadcrumb as NSString).utf8String, -1, nil)
         
-        contentData.withUnsafeBytes { buf in
+        _ = contentData.withUnsafeBytes { buf in
             sqlite3_bind_blob(chunkStmt, 4, buf.baseAddress, Int32(contentData.count), nil)
         }
         sqlite3_bind_int(chunkStmt, 5, Int32(encryptionType))
@@ -293,17 +292,20 @@ class Compiler {
         db.finalize(chunkStmt)
         
         // Insert into docent_vectors
-        let vectorSql = "INSERT INTO docent_vectors (chunk_id, vector, dimensions) VALUES (?, ?, ?);"
+        let vectorSql = "INSERT INTO docent_vectors (chunk_id, title_vector, body_vector, dimensions) VALUES (?, ?, ?, ?);"
         let vectorStmt = try db.prepare(sql: vectorSql)
         
         sqlite3_bind_int64(vectorStmt, 1, chunkId)
-        vectorData.withUnsafeBytes { buf in
-            sqlite3_bind_blob(vectorStmt, 2, buf.baseAddress, Int32(vectorData.count), nil)
+        _ = titleVectorData.withUnsafeBytes { buf in
+            sqlite3_bind_blob(vectorStmt, 2, buf.baseAddress, Int32(titleVectorData.count), nil)
         }
-        sqlite3_bind_int(vectorStmt, 3, Int32(floatVector.count))
+        _ = bodyVectorData.withUnsafeBytes { buf in
+            sqlite3_bind_blob(vectorStmt, 3, buf.baseAddress, Int32(bodyVectorData.count), nil)
+        }
+        sqlite3_bind_int(vectorStmt, 4, Int32(titleFloatVector.count))
         
         if sqlite3_step(vectorStmt) != SQLITE_DONE {
-            throw DocentError.databaseError("Failed to insert vector")
+            throw DocentError.databaseError("Failed to insert vectors")
         }
         db.finalize(vectorStmt)
     }
@@ -322,3 +324,5 @@ struct FileMetadata {
     var tags: String?
     var priority: Double = 1.0
 }
+
+await DocentCompilerMain.main()

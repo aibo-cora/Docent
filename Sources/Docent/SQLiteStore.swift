@@ -47,6 +47,7 @@ public enum DocentError: Error, LocalizedError {
     case embeddingError(String)
     case encryptionError(String)
     case fileError(String)
+    case missingKnowledgeBase
 
     public var errorDescription: String? {
         switch self {
@@ -54,6 +55,7 @@ public enum DocentError: Error, LocalizedError {
         case .embeddingError(let msg): return "Embedding Error: \(msg)"
         case .encryptionError(let msg): return "Encryption Error: \(msg)"
         case .fileError(let msg): return "File Error: \(msg)"
+        case .missingKnowledgeBase: return "Knowledge Base (Knowledge.docent) not found in bundle."
         }
     }
 }
