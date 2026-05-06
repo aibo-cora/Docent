@@ -7,18 +7,28 @@ let package = Package(
     products: [
         .library(name: "Docent", targets: ["Docent"]),
         .library(name: "DocentUI", targets: ["DocentUI"]),
+        .library(name: "DocentSQLCipher", targets: ["DocentSQLCipher"]),
         .executable(name: "DocentCompiler", targets: ["DocentCompiler"]),
         .plugin(name: "DocentPlugin", targets: ["DocentPlugin"]),
         .plugin(name: "DocentInit", targets: ["DocentInit"])
     ],
     dependencies: [
-        // No external dependencies for core, keeping it lightweight.
+        .package(url: "https://github.com/stephencelis/SQLite.swift.git", from: "0.15.3"),
     ],
     targets: [
         .target(
             name: "Docent",
             dependencies: [],
             path: "Sources/Docent"
+        ),
+        .target(
+            name: "DocentSQLCipher",
+            dependencies: [
+                "Docent",
+                .product(name: "SQLite", package: "SQLite.swift")
+            ],
+            path: "Sources/DocentSQLCipher",
+            swiftSettings: [.define("DOCENT_SQLCIPHER")]
         ),
         .target(
             name: "DocentUI",

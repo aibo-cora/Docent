@@ -5,11 +5,15 @@ public class SQLiteStore {
     private var db: OpaquePointer?
     private let path: String
 
-    public init(path: String) throws {
+    public init(path: String, passphrase: String? = nil) throws {
         self.path = path
         if sqlite3_open(path, &db) != SQLITE_OK {
             let error = String(cString: sqlite3_errmsg(db))
             throw DocentError.databaseError("Could not open database at \(path): \(error)")
+        }
+        
+        if let passphrase = passphrase {
+            try execute("PRAGMA key = '\(passphrase)';")
         }
     }
 

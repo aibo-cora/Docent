@@ -3,20 +3,31 @@ import NaturalLanguage
 import Accelerate
 import SQLite3
 
+/// Configuration options for the Docent search engine.
 public struct DocentSearchConfiguration: Sendable {
-    /// How much weight to give the title/breadcrumb match (0.0 to 1.0)
+    /// How much weight to give the title/breadcrumb match (0.0 to 1.0).
+    /// Higher values prioritize exact topic matches.
     public var titleWeight: Float
-    /// How much weight to give the body content match (0.0 to 1.0)
+    
+    /// How much weight to give the body content match (0.0 to 1.0).
+    /// Higher values prioritize conceptual similarity in the text.
     public var bodyWeight: Float
-    /// Maximum number of results to return
+    
+    /// Maximum number of results to return for a single query.
     public var topK: Int
-    /// Score threshold for "High" confidence
+    
+    /// The minimum score (0.0 to 1.0) required to label a result as "High" confidence.
     public var highThreshold: Double
-    /// Score threshold for "Medium" confidence
+    
+    /// The minimum score (0.0 to 1.0) required to label a result as "Medium" confidence.
     public var mediumThreshold: Double
-    /// Minimum score required to show a result at all
+    
+    /// The minimum score required to show a result at all. 
+    /// Matches scoring below this are filtered out entirely.
     public var silenceThreshold: Double
-    /// Optional tags to filter the search by
+    
+    /// Optional tags to restrict the search scope. 
+    /// Only chunks matching at least one of these tags will be returned.
     public var filterTags: [String]?
     
     public init(
@@ -37,16 +48,25 @@ public struct DocentSearchConfiguration: Sendable {
         self.filterTags = filterTags
     }
     
+    /// The default configuration used by the Docent engine.
     public static let `default` = DocentSearchConfiguration()
 }
 
+/// A single unit of documentation (a "chunk") retrieved from the knowledge base.
 public struct DocentChunk: Identifiable, Sendable {
+    /// Unique identifier for the chunk.
     public let id: Int64
+    /// The specific heading or title for this chunk.
     public let title: String
+    /// The full hierarchical path (e.g., "Setup > Installation > Step 1").
     public let breadcrumb: String
+    /// The raw text content of the chunk.
     public let text: String
+    /// The relative path of the source Markdown file.
     public let sourceFile: String
+    /// The priority multiplier applied to this chunk's search score.
     public let priority: Double
+    /// Metadata tags associated with this chunk via Frontmatter.
     public let tags: [String]
     
     public init(id: Int64, title: String, breadcrumb: String, text: String, sourceFile: String, priority: Double, tags: [String]) {
@@ -60,12 +80,17 @@ public struct DocentChunk: Identifiable, Sendable {
     }
 }
 
+/// A ranked search result containing a chunk and its relevance score.
 public struct DocentResult: Identifiable, Sendable {
     public var id: Int64 { chunk.id }
+    /// The documentation chunk found.
     public let chunk: DocentChunk
+    /// The similarity score (0.0 to 1.0) adjusted by priority and weights.
     public let score: Double
+    /// A human-readable confidence level based on the score.
     public let confidence: Confidence
     
+    /// Qualitative levels of search confidence.
     public enum Confidence: String, Sendable {
         case high, medium, low
     }
@@ -80,16 +105,27 @@ public struct DocentResult: Identifiable, Sendable {
     }
 }
 
+/// Supported encryption methods for the on-device knowledge base.
 public enum DocentEncryption: Sendable {
+    /// No encryption. The SQLite file is readable by standard tools.
     case none
+    /// Content-level encryption using AES-GCM. Protects text and vectors without bundle bloat.
     case cryptoKit(key: String)
+    /// Full-file encryption using SQLCipher. Protects the entire database structure.
+    case sqlCipher(passphrase: String)
 }
 
+/// The runtime engine responsible for performing semantic search over the compiled knowledge base.
 public actor DocentEngine {
     private let embedding: NLEmbedding?
     private let store: SQLiteStore
     private var encryptionService: EncryptionService?
     
+    /// Initializes a new engine from a bundled resource.
+    /// - Parameters:
+    ///   - resource: The name of the `.docent` file (e.g., "Knowledge").
+    ///   - bundle: The bundle containing the resource. Defaults to `.main`.
+    ///   - encryption: The encryption method used during compilation.
     public init(resource: String, bundle: Bundle = .main, encryption: DocentEncryption = .none) throws {
         self.embedding = NLEmbedding.sentenceEmbedding(for: .english)
         
@@ -97,22 +133,39 @@ public actor DocentEngine {
             throw DocentError.missingKnowledgeBase
         }
         
-        self.store = try SQLiteStore(path: path)
+        var passphrase: String? = nil
+        if case .sqlCipher(let pass) = encryption {
+            passphrase = pass
+        }
+        
+        self.store = try SQLiteStore(path: path, passphrase: passphrase)
         
         if case .cryptoKit(let key) = encryption {
             self.encryptionService = try? EncryptionService(keyData: key.data(using: .utf8)!)
         }
     }
 
+    /// Initializes a new engine from a direct file path.
     public init(path: String, encryption: DocentEncryption = .none) throws {
         self.embedding = NLEmbedding.sentenceEmbedding(for: .english)
-        self.store = try SQLiteStore(path: path)
+        
+        var passphrase: String? = nil
+        if case .sqlCipher(let pass) = encryption {
+            passphrase = pass
+        }
+        
+        self.store = try SQLiteStore(path: path, passphrase: passphrase)
         
         if case .cryptoKit(let key) = encryption {
             self.encryptionService = try? EncryptionService(keyData: key.data(using: .utf8)!)
         }
     }
     
+    /// Performs a semantic search over the knowledge base.
+    /// - Parameters:
+    ///   - text: The natural language query from the user.
+    ///   - configuration: Optional search parameters.
+    /// - Returns: A ranked list of matching results.
     public func query(_ text: String, configuration: DocentSearchConfiguration = .default) async throws -> [DocentResult] {
         guard let embedding = embedding, let queryVector = embedding.vector(for: text) else {
             return []
@@ -205,7 +258,7 @@ public actor DocentEngine {
                     data = try service.decrypt(combinedData: data)
                 }
                 
-                return data.withUnsafeBytes { buffer in
+                return data.withUnsafeBytes { buffer -> [Float] in
                     let floatPtr = buffer.baseAddress!.assumingMemoryBound(to: Float.self)
                     return Array(UnsafeBufferPointer(start: floatPtr, count: Int(dimensions)))
                 }
