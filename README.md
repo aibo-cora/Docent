@@ -28,7 +28,7 @@ Add Docent to your `Package.swift`:
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/aibo-cora/Docent", from: "1.1.0")
+    .package(url: "https://github.com/aibo-cora/Docent", from: "1.3.0")
 ]
 ```
 
@@ -60,7 +60,10 @@ struct HelpView: View {
 ```
 
 ### High-Precision Search
-Docent v1.1.0 uses **Dual-Vector Weighted Search**, which embeds your Titles and Body text separately to ensure that exact topic matches (like "deleting account") receive high confidence scores.
+Docent uses **Dual-Vector Weighted Search**, which embeds your Titles and Body text separately to ensure that exact topic matches (like "deleting account") receive high confidence scores.
+
+### Incremental Build Caching
+Starting in v1.3.0, Docent uses a state-aware compiler that only re-indexes documentation that has actually changed. This makes builds lightning fast even for massive documentation sets.
 
 ---
 

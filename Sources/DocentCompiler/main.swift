@@ -2,12 +2,13 @@ import Foundation
 import NaturalLanguage
 import Docent
 import SQLite3
+import CryptoKit
 
 struct DocentCompilerMain {
     static func main() async {
         let args = ProcessInfo.processInfo.arguments
         guard args.count >= 3 else {
-            print("Usage: docent-compiler <input_folder> <output_file> [--key <encryption_key>] [--password <db_passphrase>]")
+            print("Usage: docent-compiler <input_folder> <output_file> [--key <encryption_key>] [--password <db_passphrase>] [--force]")
             return
         }
         
@@ -23,23 +24,20 @@ struct DocentCompilerMain {
         if let passIndex = args.firstIndex(of: "--password"), passIndex + 1 < args.count {
             dbPassphrase = args[passIndex + 1]
         }
+        
+        let forceRebuild = args.contains("--force")
 
         print("🚀 Docent Compiler starting...")
         print("📁 Input: \(inputFolder)")
         print("📄 Output: \(outputFile)")
         
-        if encryptionKey != nil {
-            print("🔐 Encryption: Enabled (CryptoKit)")
-        }
-        
-        if dbPassphrase != nil {
-            print("🔐 Database Encryption: Enabled (SQLCipher)")
-        }
+        if encryptionKey != nil { print("🔐 Encryption: Enabled (CryptoKit)") }
+        if dbPassphrase != nil { print("🔐 Database Encryption: Enabled (SQLCipher)") }
+        if forceRebuild { print("⚡️ Mode: Force Rebuild") }
         
         do {
-            let compiler = Compiler(inputPath: inputFolder, outputPath: outputFile, key: encryptionKey, password: dbPassphrase)
+            let compiler = Compiler(inputPath: inputFolder, outputPath: outputFile, key: encryptionKey, password: dbPassphrase, force: forceRebuild)
             try await compiler.run()
-            print("✅ Compilation complete!")
         } catch {
             print("error: \(error.localizedDescription)")
             exit(1)
@@ -52,14 +50,20 @@ class Compiler {
     let outputPath: String
     let encryptionKey: String?
     let dbPassphrase: String?
+    let forceRebuild: Bool
     let embedding: NLEmbedding?
     private var encryptionService: EncryptionService?
+    
+    private var updatedCount = 0
+    private var reusedCount = 0
+    private var buildId: Int64 = Int64(Date().timeIntervalSince1970)
 
-    init(inputPath: String, outputPath: String, key: String?, password: String? = nil) {
+    init(inputPath: String, outputPath: String, key: String?, password: String? = nil, force: Bool = false) {
         self.inputPath = inputPath
         self.outputPath = outputPath
         self.encryptionKey = key
         self.dbPassphrase = password
+        self.forceRebuild = force
         self.embedding = NLEmbedding.sentenceEmbedding(for: .english)
         
         if let key = key {
@@ -68,12 +72,18 @@ class Compiler {
     }
 
     func run() async throws {
-        if FileManager.default.fileExists(atPath: outputPath) {
-            try FileManager.default.removeItem(atPath: outputPath)
-        }
+        let fileManager = FileManager.default
+        let dbExists = fileManager.fileExists(atPath: outputPath)
         
+        // If force or no DB, we start fresh. Otherwise, we open for incremental.
         let db = try SQLiteStore(path: outputPath, passphrase: dbPassphrase)
-        try createSchema(db)
+        
+        if !dbExists || forceRebuild {
+            try createSchema(db)
+        } else {
+            // Validate model version before proceeding
+            try validateModelVersion(db)
+        }
 
         let mdFiles = try findMarkdownFiles(at: inputPath)
         print("Found \(mdFiles.count) Markdown files.")
@@ -82,16 +92,48 @@ class Compiler {
             try processFile(fileURL, db: db)
         }
 
+        // Cleanup orphaned chunks
+        let deleteStmt = try db.prepare(sql: "DELETE FROM docent_chunks WHERE last_seen < ?;")
+        sqlite3_bind_int64(deleteStmt, 1, buildId)
+        sqlite3_step(deleteStmt)
+        db.finalize(deleteStmt)
+        
+        // Cleanup orphaned vectors
+        try db.execute("DELETE FROM docent_vectors WHERE chunk_id NOT IN (SELECT id FROM docent_chunks);")
+
         print("Optimizing database...")
         try db.execute("PRAGMA journal_mode = DELETE;")
         try db.execute("VACUUM;")
         try db.execute("ANALYZE;")
+        
+        print("\n✨ Docent: \(updatedCount) chunks updated, \(reusedCount) reused.")
+        print("✅ Compilation complete!")
+    }
+
+    private func validateModelVersion(_ db: SQLiteStore) throws {
+        // Simple version check logic - if model differs, force fresh schema
+        // In v1.3.0 we'll just check the version string for now
+        let stmt = try db.prepare(sql: "SELECT value FROM docent_info WHERE key = 'version';")
+        if sqlite3_step(stmt) == SQLITE_ROW {
+            let version = String(cString: sqlite3_column_text(stmt, 0))
+            if version != "1.3.0" {
+                db.finalize(stmt)
+                print("🔄 Version mismatch (\(version) -> 1.3.0). Forcing rebuild.")
+                try createSchema(db)
+                return
+            }
+        }
+        db.finalize(stmt)
     }
 
     private func createSchema(_ db: SQLiteStore) throws {
+        try db.execute("DROP TABLE IF EXISTS docent_info;")
+        try db.execute("DROP TABLE IF EXISTS docent_vectors;")
+        try db.execute("DROP TABLE IF EXISTS docent_chunks;")
+        
         try db.execute("""
             CREATE TABLE docent_info (key TEXT PRIMARY KEY, value TEXT);
-            INSERT INTO docent_info (key, value) VALUES ('version', '1.1.0');
+            INSERT INTO docent_info (key, value) VALUES ('version', '1.3.0');
             INSERT INTO docent_info (key, value) VALUES ('model', 'apple-nl-v1');
             
             CREATE TABLE docent_chunks (
@@ -103,7 +145,9 @@ class Compiler {
                 encryption_type INTEGER DEFAULT 0,
                 nonce BLOB,
                 priority REAL DEFAULT 1.0,
-                tags TEXT
+                tags TEXT,
+                content_hash TEXT,
+                last_seen INTEGER
             );
             
             CREATE TABLE docent_vectors (
@@ -131,14 +175,12 @@ class Compiler {
 
     private func processFile(_ url: URL, db: SQLiteStore) throws {
         let relativePath = url.path.replacingOccurrences(of: URL(fileURLWithPath: inputPath).path + "/", with: "")
-        print("  Processing: \(relativePath)")
-        
         let content = try String(contentsOf: url)
         let (metadata, markdown) = extractFrontmatter(content)
         let chunks = parseMarkdown(markdown, fileMetadata: metadata)
         
         for chunk in chunks {
-            try insertChunk(chunk, relativePath: relativePath, db: db)
+            try insertOrUpdateChunk(chunk, relativePath: relativePath, db: db)
         }
     }
 
@@ -187,7 +229,6 @@ class Compiler {
     private func parseMarkdown(_ text: String, fileMetadata: FileMetadata) -> [RawChunk] {
         var chunks: [RawChunk] = []
         let lines = text.components(separatedBy: .newlines)
-        
         var headerStack: [(level: Int, title: String)] = []
         var currentBody: [String] = []
         
@@ -195,7 +236,8 @@ class Compiler {
             guard !currentBody.isEmpty, !headerStack.isEmpty else { return }
             let breadcrumb = headerStack.map { $0.title }.joined(separator: " > ")
             let title = headerStack.last!.title
-            let contextBody = "\(breadcrumb): " + currentBody.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
+            let bodyText = currentBody.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
+            let contextBody = "\(breadcrumb): " + bodyText
             
             chunks.append(RawChunk(
                 title: title,
@@ -224,7 +266,6 @@ class Compiler {
                 currentBody.append(line)
             }
         }
-        
         createChunk()
         
         if chunks.isEmpty && !currentBody.isEmpty {
@@ -236,26 +277,48 @@ class Compiler {
                 tags: fileMetadata.tags
             ))
         }
-        
         return chunks
     }
 
-    private func insertChunk(_ chunk: RawChunk, relativePath: String, db: SQLiteStore) throws {
-        if chunk.body.isEmpty {
-            print("warning: Skipping empty chunk in '\(relativePath)'")
+    private func insertOrUpdateChunk(_ chunk: RawChunk, relativePath: String, db: SQLiteStore) throws {
+        if chunk.body.isEmpty { return }
+
+        // 1. Calculate Composite Hash: SHA256(breadcrumb + normalized_body)
+        let normalizedBody = chunk.body.replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression).trimmingCharacters(in: .whitespaces)
+        let hashInput = chunk.breadcrumb + normalizedBody
+        let hash = SHA256.hash(data: hashInput.data(using: .utf8)!).compactMap { String(format: "%02x", $0) }.joined()
+
+        // 2. Check if chunk already exists with same hash
+        let checkSql = "SELECT id FROM docent_chunks WHERE content_hash = ? AND file_path = ? AND title = ?;"
+        let checkStmt = try db.prepare(sql: checkSql)
+        sqlite3_bind_text(checkStmt, 1, (hash as NSString).utf8String, -1, nil)
+        sqlite3_bind_text(checkStmt, 2, (relativePath as NSString).utf8String, -1, nil)
+        sqlite3_bind_text(checkStmt, 3, (chunk.title as NSString).utf8String, -1, nil)
+        
+        if sqlite3_step(checkStmt) == SQLITE_ROW {
+            let chunkId = sqlite3_column_int64(checkStmt, 0)
+            db.finalize(checkStmt)
+            
+            // REUSE: Just update last_seen
+            let touchSql = "UPDATE docent_chunks SET last_seen = ? WHERE id = ?;"
+            let touchStmt = try db.prepare(sql: touchSql)
+            sqlite3_bind_int64(touchStmt, 1, buildId)
+            sqlite3_bind_int64(touchStmt, 2, chunkId)
+            sqlite3_step(touchStmt)
+            db.finalize(touchStmt)
+            
+            reusedCount += 1
             return
         }
+        db.finalize(checkStmt)
 
+        // 3. New or Changed: Generate embeddings
         guard let embedding = embedding else {
-            print("error: NLEmbedding unavailable.")
             throw DocentError.embeddingError("NLEmbedding unavailable")
         }
         
         guard let titleVector = embedding.vector(for: chunk.breadcrumb),
-              let bodyVector = embedding.vector(for: chunk.body) else {
-            print("error: Failed to generate vectors for '\(chunk.title)'.")
-            return 
-        }
+              let bodyVector = embedding.vector(for: chunk.body) else { return }
         
         let titleFloatVector = titleVector.map { Float32($0) }
         let bodyFloatVector = bodyVector.map { Float32($0) }
@@ -272,48 +335,44 @@ class Compiler {
             encryptionType = 2
         }
         
-        let chunkSql = "INSERT INTO docent_chunks (file_path, title, breadcrumb, content, encryption_type, priority, tags) VALUES (?, ?, ?, ?, ?, ?, ?);"
+        // UPSERT logic: delete old if exists by (file, title) to handle re-embeds
+        let cleanupSql = "DELETE FROM docent_chunks WHERE file_path = ? AND title = ?;"
+        let cleanupStmt = try db.prepare(sql: cleanupSql)
+        sqlite3_bind_text(cleanupStmt, 1, (relativePath as NSString).utf8String, -1, nil)
+        sqlite3_bind_text(cleanupStmt, 2, (chunk.title as NSString).utf8String, -1, nil)
+        sqlite3_step(cleanupStmt)
+        db.finalize(cleanupStmt)
+
+        let chunkSql = """
+            INSERT INTO docent_chunks (file_path, title, breadcrumb, content, encryption_type, priority, tags, content_hash, last_seen) 
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?);
+        """
         let chunkStmt = try db.prepare(sql: chunkSql)
-        
         sqlite3_bind_text(chunkStmt, 1, (relativePath as NSString).utf8String, -1, nil)
         sqlite3_bind_text(chunkStmt, 2, (chunk.title as NSString).utf8String, -1, nil)
         sqlite3_bind_text(chunkStmt, 3, (chunk.breadcrumb as NSString).utf8String, -1, nil)
-        
-        _ = contentData.withUnsafeBytes { buf in
-            sqlite3_bind_blob(chunkStmt, 4, buf.baseAddress, Int32(contentData.count), nil)
-        }
+        _ = contentData.withUnsafeBytes { sqlite3_bind_blob(chunkStmt, 4, $0.baseAddress, Int32(contentData.count), nil) }
         sqlite3_bind_int(chunkStmt, 5, Int32(encryptionType))
         sqlite3_bind_double(chunkStmt, 6, chunk.priority)
+        if let tags = chunk.tags { sqlite3_bind_text(chunkStmt, 7, (tags as NSString).utf8String, -1, nil) } else { sqlite3_bind_null(chunkStmt, 7) }
+        sqlite3_bind_text(chunkStmt, 8, (hash as NSString).utf8String, -1, nil)
+        sqlite3_bind_int64(chunkStmt, 9, buildId)
         
-        if let tags = chunk.tags {
-            sqlite3_bind_text(chunkStmt, 7, (tags as NSString).utf8String, -1, nil)
-        } else {
-            sqlite3_bind_null(chunkStmt, 7)
-        }
-        
-        if sqlite3_step(chunkStmt) != SQLITE_DONE {
-            throw DocentError.databaseError("Failed to insert chunk")
-        }
-        
+        if sqlite3_step(chunkStmt) != SQLITE_DONE { throw DocentError.databaseError("Failed to insert chunk") }
         let chunkId = db.lastInsertRowId()
         db.finalize(chunkStmt)
         
         let vectorSql = "INSERT INTO docent_vectors (chunk_id, title_vector, body_vector, dimensions) VALUES (?, ?, ?, ?);"
         let vectorStmt = try db.prepare(sql: vectorSql)
-        
         sqlite3_bind_int64(vectorStmt, 1, chunkId)
-        _ = titleVectorData.withUnsafeBytes { buf in
-            sqlite3_bind_blob(vectorStmt, 2, buf.baseAddress, Int32(titleVectorData.count), nil)
-        }
-        _ = bodyVectorData.withUnsafeBytes { buf in
-            sqlite3_bind_blob(vectorStmt, 3, buf.baseAddress, Int32(bodyVectorData.count), nil)
-        }
+        _ = titleVectorData.withUnsafeBytes { sqlite3_bind_blob(vectorStmt, 2, $0.baseAddress, Int32(titleVectorData.count), nil) }
+        _ = bodyVectorData.withUnsafeBytes { sqlite3_bind_blob(vectorStmt, 3, $0.baseAddress, Int32(bodyVectorData.count), nil) }
         sqlite3_bind_int(vectorStmt, 4, Int32(titleFloatVector.count))
         
-        if sqlite3_step(vectorStmt) != SQLITE_DONE {
-            throw DocentError.databaseError("Failed to insert vectors")
-        }
+        if sqlite3_step(vectorStmt) != SQLITE_DONE { throw DocentError.databaseError("Failed to insert vectors") }
         db.finalize(vectorStmt)
+        
+        updatedCount += 1
     }
 }
 
