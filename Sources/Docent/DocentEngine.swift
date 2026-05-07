@@ -26,6 +26,15 @@ public struct DocentSearchConfiguration: Sendable {
     /// Matches scoring below this are filtered out entirely.
     public var silenceThreshold: Double
     
+    /// Whether to enable in-memory keyword fallback for prefix matching.
+    public var enableKeywordFallback: Bool
+    
+    /// The score boost applied if the query is found in the title or breadcrumb.
+    public var keywordTitleBoost: Float
+    
+    /// The score boost applied if the query is found in the document body.
+    public var keywordBodyBoost: Float
+    
     /// Optional tags to restrict the search scope. 
     /// Only chunks matching at least one of these tags will be returned.
     public var filterTags: [String]?
@@ -37,6 +46,9 @@ public struct DocentSearchConfiguration: Sendable {
         highThreshold: Double = 0.82,
         mediumThreshold: Double = 0.60,
         silenceThreshold: Double = 0.35,
+        enableKeywordFallback: Bool = true,
+        keywordTitleBoost: Float = 0.4,
+        keywordBodyBoost: Float = 0.15,
         filterTags: [String]? = nil
     ) {
         self.titleWeight = titleWeight
@@ -45,6 +57,9 @@ public struct DocentSearchConfiguration: Sendable {
         self.highThreshold = highThreshold
         self.mediumThreshold = mediumThreshold
         self.silenceThreshold = silenceThreshold
+        self.enableKeywordFallback = enableKeywordFallback
+        self.keywordTitleBoost = keywordTitleBoost
+        self.keywordBodyBoost = keywordBodyBoost
         self.filterTags = filterTags
     }
     
@@ -190,10 +205,22 @@ public actor DocentEngine {
             let titleScore = cosineSimilarity(queryFloatVector, titleVector)
             let bodyScore = cosineSimilarity(queryFloatVector, bodyVector)
             
-            let weightedScore = (titleScore * configuration.titleWeight) + (bodyScore * configuration.bodyWeight)
+            var weightedScore = (titleScore * configuration.titleWeight) + (bodyScore * configuration.bodyWeight)
+            
+            // 3. Keyword Fallback (Hybrid Search)
+            if configuration.enableKeywordFallback {
+                let queryLower = text.lowercased()
+                if chunk.title.lowercased().contains(queryLower) || 
+                   chunk.breadcrumb.lowercased().contains(queryLower) {
+                    weightedScore += configuration.keywordTitleBoost
+                } else if chunk.text.lowercased().contains(queryLower) {
+                    weightedScore += configuration.keywordBodyBoost
+                }
+            }
+            
             let finalScore = weightedScore * Float(chunk.priority)
             
-            // 3. Silence Threshold
+            // 4. Silence Threshold
             if Double(finalScore) < configuration.silenceThreshold { continue }
             
             results.append(DocentResult(chunk: chunk, score: Double(min(finalScore, 1.0)), config: configuration))
