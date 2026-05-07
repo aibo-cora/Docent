@@ -4,6 +4,13 @@ import DocentUI
 
 @main
 struct DocentExampleApp: App {
+    #if os(macOS)
+    init() {
+        NSApplication.shared.setActivationPolicy(.regular)
+        NSApp.activate(ignoringOtherApps: true)
+    }
+    #endif
+    
     var body: some Scene {
         WindowGroup {
             ContentView()
