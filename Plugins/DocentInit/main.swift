@@ -13,7 +13,7 @@ struct DocentInit: CommandPlugin {
 import XcodeProjectPlugin
 
 extension DocentInit: XcodeCommandPlugin {
-    func performCommand(context: XcodePluginContext, arguments: [String]) async throws {
+    func performCommand(context: XcodePluginContext, arguments: [String]) throws {
         let projectDir = context.xcodeProject.directoryURL
         try initializeDocent(at: projectDir)
     }
