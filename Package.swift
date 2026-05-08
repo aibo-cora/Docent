@@ -50,6 +50,11 @@ let package = Package(
             path: "Sources/DocentCompiler"
         ),
         .executableTarget(
+            name: "DocentSynthesizer",
+            dependencies: ["Docent", "DocentScraper"],
+            path: "Sources/DocentSynthesizer"
+        ),
+        .executableTarget(
             name: "DocentExample",
             dependencies: ["Docent", "DocentUI"],
             path: "Sources/DocentExample",
@@ -58,7 +63,7 @@ let package = Package(
         .plugin(
             name: "DocentPlugin",
             capability: .buildTool(),
-            dependencies: ["DocentCompiler"]
+            dependencies: ["DocentCompiler", "DocentSynthesizer"]
         ),
         .plugin(
             name: "DocentInit",

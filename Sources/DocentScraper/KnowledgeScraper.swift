@@ -21,6 +21,13 @@ public struct KnowledgeContext: Codable {
 public class KnowledgeScraper: SyntaxVisitor {
     public var contexts: [KnowledgeContext] = []
     
+    public static func scrape(source: String) -> [KnowledgeContext] {
+        let scraper = KnowledgeScraper(viewMode: .sourceAccurate)
+        let sourceFile = Parser.parse(source: source)
+        scraper.walk(sourceFile)
+        return scraper.contexts
+    }
+    
     public override func visit(_ node: StructDeclSyntax) -> SyntaxVisitorContinueKind {
         if let context = processDeclaration(node, name: node.name.text, modifiers: node.modifiers, attributes: node.attributes) {
             contexts.append(context)
