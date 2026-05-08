@@ -130,6 +130,9 @@ public enum DocentEncryption: Sendable {
     case sqlCipher(passphrase: String)
 }
 
+/// @docent(topic: "Knowledge Search Engine")
+/// This feature allows users to find documentation using natural language.
+/// It uses the Accelerate framework for high-speed math.
 /// The runtime engine responsible for performing semantic search over the compiled knowledge base.
 public actor DocentEngine {
     private let embedding: NLEmbedding?

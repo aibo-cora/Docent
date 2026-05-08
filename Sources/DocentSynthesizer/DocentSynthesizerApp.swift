@@ -3,7 +3,7 @@ import Docent
 import DocentScraper
 
 @main
-struct DocentSynthesizer {
+struct DocentSynthesizerApp {
     static func main() async {
         let args = ProcessInfo.processInfo.arguments
         guard args.count >= 3 else {
@@ -13,11 +13,9 @@ struct DocentSynthesizer {
         
         let sourceFolder = args[1]
         let outputFolder = args[2]
-        // The plugin now passes the sandbox output directory
         let generatedFolder = URL(fileURLWithPath: outputFolder).appendingPathComponent("Generated")
         
         print("🤖 Docent Synthesizer starting...")
-        print("📁 Output: \(generatedFolder.path)")
         
         do {
             try FileManager.default.createDirectory(at: generatedFolder, withIntermediateDirectories: true)
@@ -31,7 +29,7 @@ struct DocentSynthesizer {
                 
                 for context in contexts {
                     print("  Synthesizing guide for: \(context.topic)...")
-                    let markdown = try await synthesize(context: context)
+                    let markdown = await synthesize(context: context)
                     
                     let safeFilename = context.topic.replacingOccurrences(of: " ", with: "_") + ".md"
                     let outputURL = generatedFolder.appendingPathComponent(safeFilename)
@@ -41,7 +39,6 @@ struct DocentSynthesizer {
                 }
             }
             
-            // Stable anchor for build system
             let timestampURL = outputFolder.hasSuffix("/") ? 
                 URL(fileURLWithPath: outputFolder + "generated.timestamp") :
                 URL(fileURLWithPath: outputFolder).appendingPathComponent("generated.timestamp")
@@ -55,12 +52,7 @@ struct DocentSynthesizer {
         }
     }
     
-    static func synthesize(context: KnowledgeContext) async throws -> String {
-        let prompt = "Synthesizing \(context.topic)"
-        return simulateAppleIntelligence(context: context, prompt: prompt)
-    }
-    
-    static func simulateAppleIntelligence(context: KnowledgeContext, prompt: String) -> String {
+    static func synthesize(context: KnowledgeContext) async -> String {
         let threshold = context.constants["threshold"] ?? "3"
         let total = context.constants["totalShares"] ?? "5"
         
