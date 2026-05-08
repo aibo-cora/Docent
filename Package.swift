@@ -14,12 +14,21 @@ let package = Package(
     ],
     dependencies: [
         .package(url: "https://github.com/stephencelis/SQLite.swift.git", from: "0.15.3"),
+        .package(url: "https://github.com/apple/swift-syntax.git", from: "600.0.1"),
     ],
     targets: [
         .target(
             name: "Docent",
             dependencies: [],
             path: "Sources/Docent"
+        ),
+        .target(
+            name: "DocentScraper",
+            dependencies: [
+                .product(name: "SwiftSyntax", package: "swift-syntax"),
+                .product(name: "SwiftParser", package: "swift-syntax")
+            ],
+            path: "Sources/DocentScraper"
         ),
         .target(
             name: "DocentSQLCipher",
