@@ -56,6 +56,8 @@ public class KnowledgeScraper: SyntaxVisitor {
             return nil
         }
         
+        print("    [Scraper] Found marker in \(name): \(docentTag)")
+        
         // Extract topic from @docent(topic: "Name")
         var topic = name
         if let range = docentTag.range(of: #"(?<=topic: ")[^"]+"#, options: .regularExpression) {

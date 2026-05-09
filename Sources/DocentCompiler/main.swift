@@ -1,8 +1,8 @@
 import Foundation
 import NaturalLanguage
-import Docent
 import SQLite3
 import CryptoKit
+import DocentCore
 
 struct DocentCompilerMain {
     static func main() async {

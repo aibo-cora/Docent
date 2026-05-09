@@ -18,9 +18,15 @@ let package = Package(
     ],
     targets: [
         .target(
-            name: "Docent",
+            name: "DocentCore",
             dependencies: [],
-            path: "Sources/Docent"
+            path: "Sources/DocentCore"
+        ),
+        .target(
+            name: "Docent",
+            dependencies: ["DocentCore"],
+            path: "Sources/Docent",
+            plugins: [.plugin(name: "DocentPlugin")]
         ),
         .target(
             name: "DocentScraper",
@@ -34,6 +40,7 @@ let package = Package(
             name: "DocentSQLCipher",
             dependencies: [
                 "Docent",
+                "DocentCore",
                 .product(name: "SQLite", package: "SQLite.swift")
             ],
             path: "Sources/DocentSQLCipher",
@@ -46,19 +53,19 @@ let package = Package(
         ),
         .executableTarget(
             name: "DocentCompiler",
-            dependencies: ["Docent"],
+            dependencies: ["DocentCore"],
             path: "Sources/DocentCompiler"
         ),
         .executableTarget(
             name: "DocentSynthesizer",
-            dependencies: ["Docent", "DocentScraper"],
+            dependencies: ["DocentCore", "DocentScraper"],
             path: "Sources/DocentSynthesizer"
         ),
         .executableTarget(
             name: "DocentExample",
             dependencies: ["Docent", "DocentUI"],
             path: "Sources/DocentExample",
-            plugins: [.plugin(name: "DocentPlugin")]
+            resources: [.process("DocentDocs")]
         ),
         .plugin(
             name: "DocentPlugin",

@@ -2,6 +2,7 @@ import Foundation
 import NaturalLanguage
 import Accelerate
 import SQLite3
+import DocentCore
 
 /// Configuration options for the Docent search engine.
 public struct DocentSearchConfiguration: Sendable {
@@ -135,6 +136,21 @@ public enum DocentEncryption: Sendable {
 /// It uses the Accelerate framework for high-speed math.
 /// The runtime engine responsible for performing semantic search over the compiled knowledge base.
 public actor DocentEngine {
+    /// The bundle containing the Docent library resources.
+    public static var bundle: Bundle { .module }
+    
+    /// Finds all bundles that might contain a .docent resource.
+    public static func allAvailableBundles() -> [Bundle] {
+        var bundles = [Bundle.main, Bundle.module]
+        
+        // Scan frameworks and plugins
+        bundles.append(contentsOf: Bundle.allFrameworks)
+        bundles.append(contentsOf: Bundle.allBundles)
+        
+        // Remove duplicates and return
+        return Array(Set(bundles))
+    }
+    
     private let embedding: NLEmbedding?
     private let store: SQLiteStore
     private var encryptionService: EncryptionService?
@@ -315,4 +331,10 @@ public actor DocentEngine {
         
         return dotProduct / (sqrt(v1SumSq) * sqrt(v2SumSq))
     }
+}
+ 
+/// @docent(topic: "Accelerate Math")
+/// This implementation uses high-performance vector math via the Accelerate framework.
+extension DocentEngine {
+    // Math logic
 }

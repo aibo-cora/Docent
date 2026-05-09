@@ -1,6 +1,8 @@
 import Foundation
 import SQLite3
 
+/// @docent(topic: "SQLite Storage")
+/// This component manages the on-device knowledge base using an optimized SQLite database.
 public class SQLiteStore {
     private var db: OpaquePointer?
     private let path: String

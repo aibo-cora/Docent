@@ -1,5 +1,5 @@
 import Foundation
-import Docent
+import DocentCore
 import DocentScraper
 
 @main
@@ -19,7 +19,6 @@ struct DocentSynthesizerApp {
         
         do {
             try FileManager.default.createDirectory(at: generatedFolder, withIntermediateDirectories: true)
-            
             let sourceFiles = try findSwiftFiles(at: sourceFolder)
             var totalSynthesized = 0
             
@@ -40,11 +39,10 @@ struct DocentSynthesizerApp {
             }
             
             let timestampURL = outputFolder.hasSuffix("/") ? 
-                URL(fileURLWithPath: outputFolder + "generated.timestamp") :
-                URL(fileURLWithPath: outputFolder).appendingPathComponent("generated.timestamp")
+                URL(fileURLWithPath: outputFolder + "synthesis.anchor") :
+                URL(fileURLWithPath: outputFolder).appendingPathComponent("synthesis.anchor")
             
-            try "\(Date().timeIntervalSince1970)".write(to: timestampURL, atomically: true, encoding: .utf8)
-            
+            try "READY".write(to: timestampURL, atomically: true, encoding: .utf8)
             print("✅ Synthesis complete! Generated \(totalSynthesized) guides.")
         } catch {
             print("error: \(error.localizedDescription)")
@@ -52,22 +50,32 @@ struct DocentSynthesizerApp {
         }
     }
     
+    /// A truly generic synthesis engine that weaves any code context into a human narrative.
     static func synthesize(context: KnowledgeContext) async -> String {
-        let threshold = context.constants["threshold"] ?? "3"
-        let total = context.constants["totalShares"] ?? "5"
+        let topic = context.topic
         
+        // Extract facts
+        let constantsSection = context.constants.isEmpty ? "" : "\n### Configuration\n" + context.constants.map { "- **\($0.key)**: \($0.value)" }.joined(separator: "\n")
+        
+        let methodsSection = context.methods.isEmpty ? "" : "\n### Capabilities\nYou can interact with this feature using the following actions: \(context.methods.joined(separator: ", "))."
+        
+        let description = context.comments.first ?? "This feature provides specialized logic for your application."
+        let technicalHints = context.comments.count > 1 ? "\n\n**Note**: " + context.comments.dropFirst().joined(separator: " ") : ""
+
         return """
-        # \(context.topic)
+        # \(topic)
         
-        ## What is it?
-        \(context.topic) is a secure feature automatically documented by Docent Autopilot.
+        ## Overview
+        \(topic) is a native capability of this application. \(description)
+        \(methodsSection)
         
         ## How it works
-        This implementation uses a threshold of **\(threshold)** out of **\(total)** total pieces.
+        The behavior of this feature is factually determined by the following source-code constraints:
+        \(constantsSection)
+        \(technicalHints)
         
-        ## Technical Details
-        - Methods: \(context.methods.joined(separator: ", "))
-        - Note: \(context.comments.first ?? "Conceptual guide generated from source.")
+        ---
+        *Self-documented by Docent Autopilot.*
         """
     }
 
@@ -76,7 +84,6 @@ struct DocentSynthesizerApp {
         var files: [URL] = []
         let fileManager = FileManager.default
         if !fileManager.fileExists(atPath: path) { return [] }
-        
         let enumerator = fileManager.enumerator(at: url, includingPropertiesForKeys: [.isRegularFileKey], options: [.skipsHiddenFiles])
         while let fileURL = enumerator?.nextObject() as? URL {
             if fileURL.pathExtension.lowercased() == "swift" {

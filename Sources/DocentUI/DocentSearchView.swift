@@ -1,5 +1,6 @@
 import SwiftUI
 import Docent
+import DocentCore
 
 /// A managed search view that handles the lifecycle of the DocentEngine internally.
 public struct DocentSearch: View {
@@ -70,7 +71,20 @@ public struct DocentSearch: View {
     
     private func loadEngine() async {
         do {
-            let docentEngine = try DocentEngine(resource: resource, bundle: bundle, encryption: encryption)
+            // Attempt to find the resource in any available bundle
+            var foundPath: String? = nil
+            for candidateBundle in DocentEngine.allAvailableBundles() {
+                if let path = candidateBundle.path(forResource: resource, ofType: "docent") {
+                    foundPath = path
+                    break
+                }
+            }
+            
+            guard let path = foundPath else {
+                throw DocentError.missingKnowledgeBase
+            }
+            
+            let docentEngine = try DocentEngine(path: path, encryption: encryption)
             self.engine = docentEngine
         } catch {
             self.loadError = error
