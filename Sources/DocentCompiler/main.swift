@@ -1,14 +1,14 @@
 import Foundation
 import NaturalLanguage
-import Docent
 import SQLite3
 import CryptoKit
+import DocentCore
 
 struct DocentCompilerMain {
     static func main() async {
         let args = ProcessInfo.processInfo.arguments
         guard args.count >= 3 else {
-            print("Usage: docent-compiler <input_folder> <output_file> [--key <encryption_key>] [--password <db_passphrase>] [--force]")
+            print("Usage: docent-compiler <input_folder> <output_file> [--key <encryption_key>] [--password <db_passphrase>] [--additional-docs <folder>] [--force]")
             return
         }
         
@@ -25,10 +25,16 @@ struct DocentCompilerMain {
             dbPassphrase = args[passIndex + 1]
         }
         
+        var additionalDocs: [String] = []
+        if let addIndex = args.firstIndex(of: "--additional-docs"), addIndex + 1 < args.count {
+            additionalDocs.append(args[addIndex + 1])
+        }
+        
         let forceRebuild = args.contains("--force")
 
         print("🚀 Docent Compiler starting...")
         print("📁 Input: \(inputFolder)")
+        if !additionalDocs.isEmpty { print("📁 Extra: \(additionalDocs.joined(separator: ", "))") }
         print("📄 Output: \(outputFile)")
         
         if encryptionKey != nil { print("🔐 Encryption: Enabled (CryptoKit)") }
@@ -36,7 +42,7 @@ struct DocentCompilerMain {
         if forceRebuild { print("⚡️ Mode: Force Rebuild") }
         
         do {
-            let compiler = Compiler(inputPath: inputFolder, outputPath: outputFile, key: encryptionKey, password: dbPassphrase, force: forceRebuild)
+            let compiler = Compiler(inputPath: inputFolder, outputPath: outputFile, key: encryptionKey, password: dbPassphrase, additionalPaths: additionalDocs, force: forceRebuild)
             try await compiler.run()
         } catch {
             print("error: \(error.localizedDescription)")
@@ -47,6 +53,7 @@ struct DocentCompilerMain {
 
 class Compiler {
     let inputPath: String
+    let additionalPaths: [String]
     let outputPath: String
     let encryptionKey: String?
     let dbPassphrase: String?
@@ -58,8 +65,9 @@ class Compiler {
     private var reusedCount = 0
     private var buildId: Int64 = Int64(Date().timeIntervalSince1970)
 
-    init(inputPath: String, outputPath: String, key: String?, password: String? = nil, force: Bool = false) {
+    init(inputPath: String, outputPath: String, key: String?, password: String? = nil, additionalPaths: [String] = [], force: Bool = false) {
         self.inputPath = inputPath
+        self.additionalPaths = additionalPaths
         self.outputPath = outputPath
         self.encryptionKey = key
         self.dbPassphrase = password
@@ -75,30 +83,33 @@ class Compiler {
         let fileManager = FileManager.default
         let dbExists = fileManager.fileExists(atPath: outputPath)
         
-        // If force or no DB, we start fresh. Otherwise, we open for incremental.
         let db = try SQLiteStore(path: outputPath, passphrase: dbPassphrase)
         
         if !dbExists || forceRebuild {
             try createSchema(db)
         } else {
-            // Validate model version before proceeding
             try validateModelVersion(db)
         }
 
+        // Process main input path
         let mdFiles = try findMarkdownFiles(at: inputPath)
-        print("Found \(mdFiles.count) Markdown files.")
-
         for fileURL in mdFiles {
-            try processFile(fileURL, db: db)
+            try processFile(fileURL, sourceRoot: inputPath, db: db)
+        }
+        
+        // Process additional paths (like Generated docs)
+        for extraPath in additionalPaths {
+            let extraFiles = try findMarkdownFiles(at: extraPath)
+            for fileURL in extraFiles {
+                try processFile(fileURL, sourceRoot: extraPath, db: db)
+            }
         }
 
-        // Cleanup orphaned chunks
+        print("Cleaning up orphaned data...")
         let deleteStmt = try db.prepare(sql: "DELETE FROM docent_chunks WHERE last_seen < ?;")
         sqlite3_bind_int64(deleteStmt, 1, buildId)
         sqlite3_step(deleteStmt)
         db.finalize(deleteStmt)
-        
-        // Cleanup orphaned vectors
         try db.execute("DELETE FROM docent_vectors WHERE chunk_id NOT IN (SELECT id FROM docent_chunks);")
 
         print("Optimizing database...")
@@ -111,14 +122,12 @@ class Compiler {
     }
 
     private func validateModelVersion(_ db: SQLiteStore) throws {
-        // Simple version check logic - if model differs, force fresh schema
-        // In v1.3.0 we'll just check the version string for now
         let stmt = try db.prepare(sql: "SELECT value FROM docent_info WHERE key = 'version';")
         if sqlite3_step(stmt) == SQLITE_ROW {
             let version = String(cString: sqlite3_column_text(stmt, 0))
-            if version != "1.3.0" {
+            if version != "1.5.0" {
                 db.finalize(stmt)
-                print("🔄 Version mismatch (\(version) -> 1.3.0). Forcing rebuild.")
+                print("🔄 Version mismatch (\(version) -> 1.5.0). Forcing rebuild.")
                 try createSchema(db)
                 return
             }
@@ -133,7 +142,7 @@ class Compiler {
         
         try db.execute("""
             CREATE TABLE docent_info (key TEXT PRIMARY KEY, value TEXT);
-            INSERT INTO docent_info (key, value) VALUES ('version', '1.3.0');
+            INSERT INTO docent_info (key, value) VALUES ('version', '1.5.0');
             INSERT INTO docent_info (key, value) VALUES ('model', 'apple-nl-v1');
             
             CREATE TABLE docent_chunks (
@@ -163,7 +172,11 @@ class Compiler {
     private func findMarkdownFiles(at path: String) throws -> [URL] {
         let url = URL(fileURLWithPath: path)
         var files: [URL] = []
-        let enumerator = FileManager.default.enumerator(at: url, includingPropertiesForKeys: [.isRegularFileKey], options: [.skipsHiddenFiles])
+        let fileManager = FileManager.default
+        
+        if !fileManager.fileExists(atPath: path) { return [] }
+        
+        let enumerator = fileManager.enumerator(at: url, includingPropertiesForKeys: [.isRegularFileKey], options: [.skipsHiddenFiles])
         
         while let fileURL = enumerator?.nextObject() as? URL {
             if fileURL.pathExtension.lowercased() == "md" {
@@ -173,8 +186,8 @@ class Compiler {
         return files
     }
 
-    private func processFile(_ url: URL, db: SQLiteStore) throws {
-        let relativePath = url.path.replacingOccurrences(of: URL(fileURLWithPath: inputPath).path + "/", with: "")
+    private func processFile(_ url: URL, sourceRoot: String, db: SQLiteStore) throws {
+        let relativePath = url.path.replacingOccurrences(of: URL(fileURLWithPath: sourceRoot).path + "/", with: "")
         let content = try String(contentsOf: url)
         let (metadata, markdown) = extractFrontmatter(content)
         let chunks = parseMarkdown(markdown, fileMetadata: metadata)
@@ -283,12 +296,10 @@ class Compiler {
     private func insertOrUpdateChunk(_ chunk: RawChunk, relativePath: String, db: SQLiteStore) throws {
         if chunk.body.isEmpty { return }
 
-        // 1. Calculate Composite Hash: SHA256(breadcrumb + normalized_body)
         let normalizedBody = chunk.body.replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression).trimmingCharacters(in: .whitespaces)
         let hashInput = chunk.breadcrumb + normalizedBody
         let hash = SHA256.hash(data: hashInput.data(using: .utf8)!).compactMap { String(format: "%02x", $0) }.joined()
 
-        // 2. Check if chunk already exists with same hash
         let checkSql = "SELECT id FROM docent_chunks WHERE content_hash = ? AND file_path = ? AND title = ?;"
         let checkStmt = try db.prepare(sql: checkSql)
         sqlite3_bind_text(checkStmt, 1, (hash as NSString).utf8String, -1, nil)
@@ -299,7 +310,6 @@ class Compiler {
             let chunkId = sqlite3_column_int64(checkStmt, 0)
             db.finalize(checkStmt)
             
-            // REUSE: Just update last_seen
             let touchSql = "UPDATE docent_chunks SET last_seen = ? WHERE id = ?;"
             let touchStmt = try db.prepare(sql: touchSql)
             sqlite3_bind_int64(touchStmt, 1, buildId)
@@ -312,7 +322,6 @@ class Compiler {
         }
         db.finalize(checkStmt)
 
-        // 3. New or Changed: Generate embeddings
         guard let embedding = embedding else {
             throw DocentError.embeddingError("NLEmbedding unavailable")
         }
@@ -335,7 +344,6 @@ class Compiler {
             encryptionType = 2
         }
         
-        // UPSERT logic: delete old if exists by (file, title) to handle re-embeds
         let cleanupSql = "DELETE FROM docent_chunks WHERE file_path = ? AND title = ?;"
         let cleanupStmt = try db.prepare(sql: cleanupSql)
         sqlite3_bind_text(cleanupStmt, 1, (relativePath as NSString).utf8String, -1, nil)

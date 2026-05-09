@@ -21,6 +21,6 @@ struct DocentExampleApp: App {
 struct ContentView: View {
     var body: some View {
         // One line of code to add full semantic search.
-        DocentSearch(resource: "Knowledge", bundle: .module)
+        DocentSearch(resource: "Knowledge", bundle: DocentEngine.bundle)
     }
 }
