@@ -28,7 +28,7 @@ Add Docent to your `Package.swift`:
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/aibo-cora/Docent", from: "1.4.0")
+    .package(url: "https://github.com/aibo-cora/Docent", from: "1.5.0")
 ]
 ```
 
@@ -39,12 +39,12 @@ In your app target settings:
 
 ---
 
-## Docent Autopilot (Beta)
+## Docent Autopilot (New!)
 
-Docent v1.4.0 introduces the first phase of **Autopilot**: The Knowledge Scraper. This allows Docent to "read" your source code and extract conceptual intelligence automatically.
+Docent v1.5.0 officially launches **Autopilot**, a visionary AI-powered documentation pipeline. By simply marking your code, Docent will automatically "read" your source logic and synthesize user-friendly guides using on-device **Apple Intelligence**.
 
 ### Marking Your Code
-Simply add a `/// @docent` marker above your feature logic. Docent will extract constants, variables, and technical comments to build a conceptual understanding of the feature.
+Add the `/// @docent` marker above any class or struct. Docent will extract constants, variables, and technical comments to build a conceptual guide automatically.
 
 ```swift
 /// @docent(topic: "Shamir Secret Sharing")
@@ -55,7 +55,10 @@ struct SSSManager {
 }
 ```
 
-*Note: Automated Markdown synthesis using Apple Intelligence is coming in v1.5.0.*
+### How Synthesis Works
+-   **Extraction**: Uses **SwiftSyntax** to factually map your code configuration.
+-   **Synthesis**: Uses on-device **Foundation Models** to write human narratives.
+-   **Privacy**: 100% on-device. Your source code never leaves your Mac.
 
 ---
 
