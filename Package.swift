@@ -1,5 +1,6 @@
-// swift-tools-version: 6.1
+// swift-tools-version: 6.0
 import PackageDescription
+import CompilerPluginSupport
 
 let package = Package(
     name: "Docent",
@@ -8,6 +9,7 @@ let package = Package(
         .library(name: "Docent", targets: ["Docent"]),
         .library(name: "DocentUI", targets: ["DocentUI"]),
         .library(name: "DocentSQLCipher", targets: ["DocentSQLCipher"]),
+        .library(name: "DocentMacros", targets: ["DocentMacros"]),
         .executable(name: "DocentCompiler", targets: ["DocentCompiler"]),
         .plugin(name: "DocentPlugin", targets: ["DocentPlugin"]),
         .plugin(name: "DocentInit", targets: ["DocentInit"])
@@ -17,6 +19,19 @@ let package = Package(
         .package(url: "https://github.com/apple/swift-syntax.git", "509.0.0"..<"601.0.0"),
     ],
     targets: [
+        .macro(
+            name: "DocentMacrosCompilerPlugin",
+            dependencies: [
+                .product(name: "SwiftSyntaxMacros", package: "swift-syntax"),
+                .product(name: "SwiftCompilerPlugin", package: "swift-syntax")
+            ],
+            path: "Sources/DocentMacrosCompilerPlugin"
+        ),
+        .target(
+            name: "DocentMacros",
+            dependencies: ["DocentMacrosCompilerPlugin"],
+            path: "Sources/DocentMacros"
+        ),
         .target(
             name: "DocentCore",
             dependencies: [],
@@ -24,7 +39,7 @@ let package = Package(
         ),
         .target(
             name: "Docent",
-            dependencies: ["DocentCore"],
+            dependencies: ["DocentCore", "DocentMacros"],
             path: "Sources/Docent",
             plugins: [.plugin(name: "DocentPlugin")]
         ),
