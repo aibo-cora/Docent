@@ -1,9 +1,10 @@
 import Foundation
+import DocentMacros
 
-/// @docent(topic: "Shamir Secret Sharing")
 /// This implementation allows for secure, distributed secret management.
 /// It uses polynomial interpolation over a Finite Field to ensure that
 /// no single shard contains any information about the original secret.
+@Docent(topic: "Shamir Secret Sharing")
 public struct ShamirSecretSharing {
     
     /// The minimum number of shards required to reconstruct the secret.
