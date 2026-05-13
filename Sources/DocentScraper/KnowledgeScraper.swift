@@ -43,7 +43,30 @@ public class KnowledgeScraper: SyntaxVisitor {
     }
 
     private func processDeclaration(_ node: DeclSyntaxProtocol, name: String, modifiers: DeclModifierListSyntax, attributes: AttributeListSyntax) -> KnowledgeContext? {
-        // Look for the specific marker in comments
+        // 1. Look for the @Docent macro attribute
+        var topic: String? = nil
+        
+        for attribute in attributes {
+            if let attr = attribute.as(AttributeSyntax.self),
+               let identifier = attr.attributeName.as(IdentifierTypeSyntax.self)?.name.text,
+               identifier == "Docent" {
+                
+                // Extract topic from @Docent(topic: "Name")
+                if let arguments = attr.arguments?.as(LabeledExprListSyntax.self) {
+                    for arg in arguments {
+                        if arg.label?.text == "topic",
+                           let stringLiteral = arg.expression.as(StringLiteralExprSyntax.self) {
+                            topic = stringLiteral.segments.description
+                        }
+                    }
+                }
+                
+                // If found @Docent without arguments or different arguments, use name as default
+                if topic == nil { topic = name }
+            }
+        }
+
+        // 2. Fallback to old @docent comment marker for backwards compatibility or if macro is missing
         let leadingTrivia = node.leadingTrivia
         let comments = leadingTrivia.compactMap { piece -> String? in
             if case .docLineComment(let text) = piece {
@@ -52,17 +75,22 @@ public class KnowledgeScraper: SyntaxVisitor {
             return nil
         }
         
-        guard let docentTag = comments.first(where: { $0.contains("@docent") }) else {
+        if topic == nil {
+            if let docentTag = comments.first(where: { $0.contains("@docent") }) {
+                if let range = docentTag.range(of: #"(?<=topic: ")[^"]+"#, options: .regularExpression) {
+                    topic = String(docentTag[range])
+                } else {
+                    topic = name
+                }
+            }
+        }
+
+        // If no marker found (Macro or Comment), skip this declaration
+        guard let finalTopic = topic else {
             return nil
         }
         
-        print("    [Scraper] Found marker in \(name): \(docentTag)")
-        
-        // Extract topic from @docent(topic: "Name")
-        var topic = name
-        if let range = docentTag.range(of: #"(?<=topic: ")[^"]+"#, options: .regularExpression) {
-            topic = String(docentTag[range])
-        }
+        print("    [Scraper] Found marker in \(name): topic='\(finalTopic)'")
 
         var constants: [String: String] = [:]
         var variables: [String] = []
@@ -94,7 +122,7 @@ public class KnowledgeScraper: SyntaxVisitor {
         }
 
         return KnowledgeContext(
-            topic: topic,
+            topic: finalTopic,
             constants: constants,
             variables: variables,
             comments: comments.filter { !$0.contains("@docent") },

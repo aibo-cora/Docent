@@ -41,13 +41,15 @@ In your app target settings:
 
 ## Docent Autopilot (New!)
 
-Docent v1.5.0 officially launches **Autopilot**, a visionary AI-powered documentation pipeline. By simply marking your code, Docent will automatically "read" your source logic and synthesize user-friendly guides using on-device **Apple Intelligence**.
+Docent v1.6.0 officially launches **Autopilot**, a visionary AI-powered documentation pipeline. By simply marking your code, Docent will automatically "read" your source logic and synthesize user-friendly guides using on-device **Apple Intelligence**.
 
 ### Marking Your Code
-Add the `/// @docent` marker above any class or struct. Docent will extract constants, variables, and technical comments to build a conceptual guide automatically.
+Add the `@Docent(topic: "Topic Name")` macro above any class or struct. Docent will extract constants, variables, and technical comments to build a conceptual guide automatically.
 
 ```swift
-/// @docent(topic: "Shamir Secret Sharing")
+import DocentMacros
+
+@Docent(topic: "Shamir Secret Sharing")
 /// This implementation provides secure secret splitting.
 struct SSSManager {
     let threshold = 3
