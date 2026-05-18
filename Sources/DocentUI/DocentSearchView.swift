@@ -212,11 +212,12 @@ public struct DocentSearchView: View {
 
         await MainActor.run {
             isSynthesizing = false
-            // Suppress bare "I don't know" non-answers — engine returned below-threshold context
-            let lower = synthesizedAnswer.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
-            if lower.hasPrefix("i don't know") || lower.hasPrefix("i do not know") {
-                synthesizedAnswer = ""
-            }
+            // Suppress only bare non-answers (very short, no real content)
+            let trimmed = synthesizedAnswer.trimmingCharacters(in: .whitespacesAndNewlines)
+            let lower = trimmed.lowercased()
+            let isNonAnswer = trimmed.count < 80 &&
+                (lower.contains("i don't know") || lower.contains("i do not know") || lower.contains("no information"))
+            if isNonAnswer { synthesizedAnswer = "" }
         }
     }
 }
