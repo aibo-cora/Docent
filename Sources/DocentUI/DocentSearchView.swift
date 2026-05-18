@@ -97,18 +97,28 @@ public struct DocentSearchView: View {
     @State private var searchText = ""
     @State private var results: [DocentResult] = []
     @State private var isSearching = false
-    
+    @State private var synthesizedAnswer = ""
+    @State private var isSynthesizing = false
+    @State private var synthesisAvailable = false
+
     private let engine: DocentEngine
     private let configuration: DocentSearchConfiguration
-    
+
     public init(engine: DocentEngine, configuration: DocentSearchConfiguration = .default) {
         self.engine = engine
         self.configuration = configuration
     }
-    
+
     public var body: some View {
         NavigationView {
             List {
+                if synthesisAvailable && (isSynthesizing || !synthesizedAnswer.isEmpty) {
+                    SynthesisAnswerCard(answer: synthesizedAnswer, isLoading: isSynthesizing)
+                        .listRowBackground(Color.clear)
+                        .listRowSeparator(.hidden)
+                        .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 4, trailing: 16))
+                }
+
                 if results.isEmpty && !searchText.isEmpty && !isSearching {
                     VStack(spacing: 8) {
                         Image(systemName: "magnifyingglass")
@@ -136,34 +146,106 @@ public struct DocentSearchView: View {
             }
             .navigationTitle("Help & Docs")
             .overlay {
-                if isSearching {
+                if isSearching && results.isEmpty {
                     ProgressView()
                 }
             }
+            .task {
+                await checkSynthesisAvailability()
+            }
         }
     }
-    
+
+    private func checkSynthesisAvailability() async {
+        if #available(macOS 26.0, iOS 19.0, *) {
+            synthesisAvailable = await AppleIntelligenceProvider().isAvailable()
+        }
+    }
+
     private func performSearch(query: String) {
-        guard !query.trimmingCharacters(in: .whitespaces).isEmpty else {
+        let trimmed = query.trimmingCharacters(in: .whitespaces)
+        guard !trimmed.isEmpty else {
             results = []
+            synthesizedAnswer = ""
             return
         }
-        
+
         isSearching = true
+        synthesizedAnswer = ""
+
         Task {
             do {
-                let searchResults = try await engine.query(query, configuration: configuration)
+                let searchResults = try await engine.query(trimmed, configuration: configuration)
                 await MainActor.run {
                     self.results = searchResults
                     self.isSearching = false
                 }
             } catch {
-                print("Search error: \(error)")
-                await MainActor.run {
-                    self.isSearching = false
-                }
+                await MainActor.run { self.isSearching = false }
             }
         }
+
+        if synthesisAvailable {
+            if #available(macOS 26.0, iOS 19.0, *) {
+                Task { await performSynthesis(query: trimmed) }
+            }
+        }
+    }
+
+    @available(macOS 26.0, iOS 19.0, *)
+    private func performSynthesis(query: String) async {
+        await MainActor.run { isSynthesizing = true }
+        do {
+            let stream = try await engine.synthesize(query, provider: AppleIntelligenceProvider())
+            var hasTokens = false
+            for try await token in stream {
+                hasTokens = true
+                await MainActor.run { synthesizedAnswer += token }
+            }
+            await MainActor.run {
+                isSynthesizing = false
+                if !hasTokens { synthesizedAnswer = "" }
+            }
+        } catch {
+            await MainActor.run { isSynthesizing = false }
+        }
+    }
+}
+
+private struct SynthesisAnswerCard: View {
+    let answer: String
+    let isLoading: Bool
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 6) {
+                Image(systemName: "sparkles")
+                    .foregroundColor(.accentColor)
+                    .font(.subheadline)
+                Text("Answer")
+                    .font(.subheadline)
+                    .fontWeight(.semibold)
+                    .foregroundColor(.accentColor)
+                Spacer()
+                if isLoading {
+                    ProgressView()
+                        .scaleEffect(0.7)
+                }
+            }
+
+            if answer.isEmpty {
+                Text("Thinking...")
+                    .font(.body)
+                    .foregroundColor(.secondary)
+            } else {
+                Text(answer)
+                    .font(.body)
+                    .lineSpacing(3)
+            }
+        }
+        .padding(14)
+        .background(Color.accentColor.opacity(0.07))
+        .cornerRadius(12)
     }
 }
 
