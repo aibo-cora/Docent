@@ -11,6 +11,7 @@ let package = Package(
         .library(name: "DocentSQLCipher", targets: ["DocentSQLCipher"]),
         .library(name: "DocentMacros", targets: ["DocentMacros"]),
         .executable(name: "DocentCompiler", targets: ["DocentCompiler"]),
+        .executable(name: "DocentValidator", targets: ["DocentValidator"]),
         .plugin(name: "DocentPlugin", targets: ["DocentPlugin"]),
         .plugin(name: "DocentInit", targets: ["DocentInit"])
     ],
@@ -75,6 +76,16 @@ let package = Package(
             name: "DocentSynthesizer",
             dependencies: ["DocentCore", "DocentScraper"],
             path: "Sources/DocentSynthesizer"
+        ),
+        .executableTarget(
+            name: "CheckFoundationModels",
+            dependencies: [],
+            path: "Sources/CheckFoundationModels"
+        ),
+        .executableTarget(
+            name: "DocentValidator",
+            dependencies: [],
+            path: "Sources/DocentValidator"
         ),
         .executableTarget(
             name: "DocentExample",
