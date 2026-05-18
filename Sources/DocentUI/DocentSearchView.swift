@@ -112,35 +112,37 @@ public struct DocentSearchView: View {
 
     public var body: some View {
         NavigationView {
-            List {
+            VStack(spacing: 0) {
                 if synthesisAvailable && (isSynthesizing || !synthesizedAnswer.isEmpty) {
                     SynthesisAnswerCard(answer: synthesizedAnswer, isLoading: isSynthesizing)
-                        .listRowBackground(Color.clear)
-                        .listRowSeparator(.hidden)
-                        .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 4, trailing: 16))
+                        .padding(.horizontal, 16)
+                        .padding(.top, 8)
+                        .padding(.bottom, 4)
                 }
 
-                if results.isEmpty && !searchText.isEmpty && !isSearching {
-                    VStack(spacing: 8) {
-                        Image(systemName: "magnifyingglass")
-                            .font(.largeTitle)
-                            .foregroundColor(.secondary)
-                        Text("No results for '\(searchText)'")
-                            .font(.headline)
-                            .foregroundColor(.secondary)
-                    }
-                    .frame(maxWidth: .infinity, minHeight: 200)
-                    .listRowBackground(Color.clear)
-                    .listRowSeparator(.hidden)
-                } else {
-                    ForEach(results) { result in
-                        NavigationLink(destination: DocentDetailView(result: result)) {
-                            DocentResultRow(result: result)
+                List {
+                    if results.isEmpty && !searchText.isEmpty && !isSearching {
+                        VStack(spacing: 8) {
+                            Image(systemName: "magnifyingglass")
+                                .font(.largeTitle)
+                                .foregroundColor(.secondary)
+                            Text("No results for '\(searchText)'")
+                                .font(.headline)
+                                .foregroundColor(.secondary)
+                        }
+                        .frame(maxWidth: .infinity, minHeight: 200)
+                        .listRowBackground(Color.clear)
+                        .listRowSeparator(.hidden)
+                    } else {
+                        ForEach(results) { result in
+                            NavigationLink(destination: DocentDetailView(result: result)) {
+                                DocentResultRow(result: result)
+                            }
                         }
                     }
                 }
+                .listStyle(.plain)
             }
-            .listStyle(.plain)
             .searchable(text: $searchText, prompt: "Ask a question...")
             .onChange(of: searchText) { newValue in
                 performSearch(query: newValue)
