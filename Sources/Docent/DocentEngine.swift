@@ -7,12 +7,15 @@ import DocentCore
 /// Configuration options for the Docent search engine.
 public struct DocentSearchConfiguration: Sendable {
     /// How much weight to give the title/breadcrumb match (0.0 to 1.0).
-    /// Higher values prioritize exact topic matches.
     public var titleWeight: Float
-    
-    /// How much weight to give the body content match (0.0 to 1.0).
-    /// Higher values prioritize conceptual similarity in the text.
+
+    /// How much weight to give the context vector (breadcrumb + body, combined embedding).
+    /// Higher values favour holistic semantic coverage of the chunk.
     public var bodyWeight: Float
+
+    /// How much weight to give the pure body match (body text only, no breadcrumb).
+    /// Helps surface answers buried in body content whose header vocabulary diverges from the query.
+    public var pureBodyWeight: Float
     
     /// Maximum number of results to return for a single query.
     public var topK: Int
@@ -41,8 +44,9 @@ public struct DocentSearchConfiguration: Sendable {
     public var filterTags: [String]?
     
     public init(
-        titleWeight: Float = 0.7,
-        bodyWeight: Float = 0.3,
+        titleWeight: Float = 0.28,
+        bodyWeight: Float = 0.60,
+        pureBodyWeight: Float = 0.12,
         topK: Int = 5,
         highThreshold: Double = 0.82,
         mediumThreshold: Double = 0.60,
@@ -54,6 +58,7 @@ public struct DocentSearchConfiguration: Sendable {
     ) {
         self.titleWeight = titleWeight
         self.bodyWeight = bodyWeight
+        self.pureBodyWeight = pureBodyWeight
         self.topK = topK
         self.highThreshold = highThreshold
         self.mediumThreshold = mediumThreshold
@@ -211,20 +216,23 @@ public actor DocentEngine {
         
         var results: [DocentResult] = []
         
-        for (chunkId, (titleVector, bodyVector)) in vectors {
+        for (chunkId, (titleVector, bodyVector, pureBodyVector)) in vectors {
             guard let chunk = chunks[chunkId] else { continue }
-            
+
             // 1. Apply Tag Filtering
             if let filterTags = configuration.filterTags, !filterTags.isEmpty {
                 let hasMatch = filterTags.contains { tag in chunk.tags.contains(tag) }
                 if !hasMatch { continue }
             }
-            
-            // 2. Multi-Vector Scoring
+
+            // 2. Triple-Vector Scoring (title + context + pure-body fusion)
             let titleScore = cosineSimilarity(queryFloatVector, titleVector)
             let bodyScore = cosineSimilarity(queryFloatVector, bodyVector)
-            
-            var weightedScore = (titleScore * configuration.titleWeight) + (bodyScore * configuration.bodyWeight)
+            let pureBodyScore = cosineSimilarity(queryFloatVector, pureBodyVector)
+
+            var weightedScore = (titleScore * configuration.titleWeight)
+                              + (bodyScore * configuration.bodyWeight)
+                              + (pureBodyScore * configuration.pureBodyWeight)
             
             // 3. Keyword Fallback (Hybrid Search)
             if configuration.enableKeywordFallback {
@@ -246,6 +254,32 @@ public actor DocentEngine {
         }
         
         return results.sorted(by: { $0.score > $1.score }).prefix(configuration.topK).map { $0 }
+    }
+    
+    /// Synthesizes a human-friendly answer for the given query using documentation context.
+    /// - Parameters:
+    ///   - text: The natural language query.
+    ///   - provider: The LLM provider to use for synthesis.
+    ///   - configuration: Optional search parameters.
+    /// - Returns: A stream of tokens as they are generated.
+    public func synthesize(_ text: String, provider: LLMProvider, configuration: DocentSearchConfiguration = .default) async throws -> AsyncThrowingStream<String, Error> {
+        // 1. Retrieve the documentation context
+        let results = try await query(text, configuration: configuration)
+
+        // 2. Silence check — if no result clears the silence threshold, don't prompt the model
+        guard let best = results.first, best.score >= configuration.silenceThreshold else {
+            return AsyncThrowingStream { $0.finish() }
+        }
+
+        // 3. Format context from results that meet the silence threshold
+        let context = results
+            .filter { $0.score >= configuration.silenceThreshold }
+            .map { "[\($0.chunk.title)]: \($0.chunk.text)" }
+            .joined(separator: "\n\n")
+
+        // 4. Create the prompt and stream from the provider
+        let prompt = SynthesisPrompt(query: text, context: context)
+        return provider.generateResponse(for: prompt)
     }
     
     private func loadAllChunks() throws -> [Int64: DocentChunk] {
@@ -281,39 +315,40 @@ public actor DocentEngine {
         return chunks
     }
     
-    private func loadAllVectors() throws -> [Int64: (title: [Float], body: [Float])] {
-        var vectors: [Int64: (title: [Float], body: [Float])] = [:]
+    private func loadAllVectors() throws -> [Int64: (title: [Float], body: [Float], pureBody: [Float])] {
+        var vectors: [Int64: (title: [Float], body: [Float], pureBody: [Float])] = [:]
         let sql = """
-            SELECT v.chunk_id, v.title_vector, v.body_vector, v.dimensions, c.encryption_type 
+            SELECT v.chunk_id, v.title_vector, v.body_vector, v.pure_body_vector, v.dimensions, c.encryption_type
             FROM docent_vectors v
             JOIN docent_chunks c ON v.chunk_id = c.id;
         """
         let stmt = try store.prepare(sql: sql)
-        
+
         while sqlite3_step(stmt) == SQLITE_ROW {
             let chunkId = sqlite3_column_int64(stmt, 0)
-            let dimensions = sqlite3_column_int(stmt, 3)
-            let encryptionType = sqlite3_column_int(stmt, 4)
-            
+            let dimensions = sqlite3_column_int(stmt, 4)
+            let encryptionType = sqlite3_column_int(stmt, 5)
+
             func getVector(at index: Int32) throws -> [Float] {
                 let ptr = sqlite3_column_blob(stmt, index)
                 let len = sqlite3_column_bytes(stmt, index)
                 var data = Data(bytes: ptr!, count: Int(len))
-                
+
                 if encryptionType == 2, let service = encryptionService {
                     data = try service.decrypt(combinedData: data)
                 }
-                
+
                 return data.withUnsafeBytes { buffer -> [Float] in
                     let floatPtr = buffer.baseAddress!.assumingMemoryBound(to: Float.self)
                     return Array(UnsafeBufferPointer(start: floatPtr, count: Int(dimensions)))
                 }
             }
-            
+
             let titleVector = try getVector(at: 1)
             let bodyVector = try getVector(at: 2)
-            
-            vectors[chunkId] = (title: titleVector, body: bodyVector)
+            let pureBodyVector = try getVector(at: 3)
+
+            vectors[chunkId] = (title: titleVector, body: bodyVector, pureBody: pureBodyVector)
         }
         store.finalize(stmt)
         return vectors

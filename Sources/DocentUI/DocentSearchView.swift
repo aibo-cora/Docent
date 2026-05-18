@@ -97,73 +97,167 @@ public struct DocentSearchView: View {
     @State private var searchText = ""
     @State private var results: [DocentResult] = []
     @State private var isSearching = false
-    
+    @State private var synthesizedAnswer = ""
+    @State private var isSynthesizing = false
+    @State private var synthesisAvailable = false
+    @State private var searchTask: Task<Void, Never>? = nil
+
     private let engine: DocentEngine
     private let configuration: DocentSearchConfiguration
-    
+
     public init(engine: DocentEngine, configuration: DocentSearchConfiguration = .default) {
         self.engine = engine
         self.configuration = configuration
     }
-    
+
     public var body: some View {
         NavigationView {
-            List {
-                if results.isEmpty && !searchText.isEmpty && !isSearching {
-                    VStack(spacing: 8) {
-                        Image(systemName: "magnifyingglass")
-                            .font(.largeTitle)
-                            .foregroundColor(.secondary)
-                        Text("No results for '\(searchText)'")
-                            .font(.headline)
-                            .foregroundColor(.secondary)
-                    }
-                    .frame(maxWidth: .infinity, minHeight: 200)
-                    .listRowBackground(Color.clear)
-                    .listRowSeparator(.hidden)
-                } else {
-                    ForEach(results) { result in
-                        NavigationLink(destination: DocentDetailView(result: result)) {
-                            DocentResultRow(result: result)
+            VStack(spacing: 0) {
+                if synthesisAvailable && (isSynthesizing || !synthesizedAnswer.isEmpty) {
+                    SynthesisAnswerCard(answer: synthesizedAnswer, isLoading: isSynthesizing)
+                        .padding(.horizontal, 16)
+                        .padding(.top, 8)
+                        .padding(.bottom, 4)
+                }
+
+                List {
+                    if results.isEmpty && !searchText.isEmpty && !isSearching {
+                        VStack(spacing: 8) {
+                            Image(systemName: "magnifyingglass")
+                                .font(.largeTitle)
+                                .foregroundColor(.secondary)
+                            Text("No results for '\(searchText)'")
+                                .font(.headline)
+                                .foregroundColor(.secondary)
+                        }
+                        .frame(maxWidth: .infinity, minHeight: 200)
+                        .listRowBackground(Color.clear)
+                        .listRowSeparator(.hidden)
+                    } else {
+                        ForEach(results) { result in
+                            NavigationLink(destination: DocentDetailView(result: result)) {
+                                DocentResultRow(result: result)
+                            }
                         }
                     }
                 }
+                .listStyle(.plain)
             }
-            .listStyle(.plain)
             .searchable(text: $searchText, prompt: "Ask a question...")
             .onChange(of: searchText) { newValue in
                 performSearch(query: newValue)
             }
             .navigationTitle("Help & Docs")
             .overlay {
-                if isSearching {
+                if isSearching && results.isEmpty {
                     ProgressView()
                 }
             }
+            .task {
+                await checkSynthesisAvailability()
+            }
         }
     }
-    
+
+    private func checkSynthesisAvailability() async {
+        if #available(macOS 26.0, iOS 19.0, *) {
+            synthesisAvailable = await AppleIntelligenceProvider().isAvailable()
+        }
+    }
+
     private func performSearch(query: String) {
-        guard !query.trimmingCharacters(in: .whitespaces).isEmpty else {
+        let trimmed = query.trimmingCharacters(in: .whitespaces)
+
+        searchTask?.cancel()
+        synthesizedAnswer = ""
+
+        guard !trimmed.isEmpty else {
             results = []
             return
         }
-        
+
         isSearching = true
-        Task {
+
+        searchTask = Task {
+            defer { Task { @MainActor in isSearching = false } }
+
             do {
-                let searchResults = try await engine.query(query, configuration: configuration)
-                await MainActor.run {
-                    self.results = searchResults
-                    self.isSearching = false
+                let searchResults = try await engine.query(trimmed, configuration: configuration)
+                guard !Task.isCancelled else { return }
+
+                await MainActor.run { results = searchResults }
+
+                // Only synthesize when retrieval has at least one medium-confidence hit
+                guard synthesisAvailable,
+                      searchResults.first?.confidence == .high ||
+                      searchResults.first?.confidence == .medium else { return }
+
+                if #available(macOS 26.0, iOS 19.0, *) {
+                    await performSynthesis(query: trimmed)
                 }
             } catch {
-                print("Search error: \(error)")
-                await MainActor.run {
-                    self.isSearching = false
-                }
+                // Task cancellation is expected — ignore silently
             }
         }
+    }
+
+    @available(macOS 26.0, iOS 19.0, *)
+    private func performSynthesis(query: String) async {
+        await MainActor.run { isSynthesizing = true }
+        do {
+            let stream = try await engine.synthesize(query, provider: AppleIntelligenceProvider())
+            for try await token in stream {
+                guard !Task.isCancelled else { break }
+                await MainActor.run { synthesizedAnswer += token }
+            }
+        } catch { }
+
+        await MainActor.run {
+            isSynthesizing = false
+            // Suppress only bare non-answers (very short, no real content)
+            let trimmed = synthesizedAnswer.trimmingCharacters(in: .whitespacesAndNewlines)
+            let lower = trimmed.lowercased()
+            let isNonAnswer = trimmed.count < 80 &&
+                (lower.contains("i don't know") || lower.contains("i do not know") || lower.contains("no information"))
+            if isNonAnswer { synthesizedAnswer = "" }
+        }
+    }
+}
+
+private struct SynthesisAnswerCard: View {
+    let answer: String
+    let isLoading: Bool
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 6) {
+                Image(systemName: "sparkles")
+                    .foregroundColor(.accentColor)
+                    .font(.subheadline)
+                Text("Answer")
+                    .font(.subheadline)
+                    .fontWeight(.semibold)
+                    .foregroundColor(.accentColor)
+                Spacer()
+                if isLoading {
+                    ProgressView()
+                        .scaleEffect(0.7)
+                }
+            }
+
+            if answer.isEmpty {
+                Text("Thinking...")
+                    .font(.body)
+                    .foregroundColor(.secondary)
+            } else {
+                Text(answer)
+                    .font(.body)
+                    .lineSpacing(3)
+            }
+        }
+        .padding(14)
+        .background(Color.accentColor.opacity(0.07))
+        .cornerRadius(12)
     }
 }
 

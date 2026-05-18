@@ -125,9 +125,9 @@ class Compiler {
         let stmt = try db.prepare(sql: "SELECT value FROM docent_info WHERE key = 'version';")
         if sqlite3_step(stmt) == SQLITE_ROW {
             let version = String(cString: sqlite3_column_text(stmt, 0))
-            if version != "1.5.0" {
+            if version != "2.0.0" {
                 db.finalize(stmt)
-                print("🔄 Version mismatch (\(version) -> 1.5.0). Forcing rebuild.")
+                print("🔄 Version mismatch (\(version) -> 2.0.0). Forcing rebuild.")
                 try createSchema(db)
                 return
             }
@@ -139,12 +139,12 @@ class Compiler {
         try db.execute("DROP TABLE IF EXISTS docent_info;")
         try db.execute("DROP TABLE IF EXISTS docent_vectors;")
         try db.execute("DROP TABLE IF EXISTS docent_chunks;")
-        
+
         try db.execute("""
             CREATE TABLE docent_info (key TEXT PRIMARY KEY, value TEXT);
-            INSERT INTO docent_info (key, value) VALUES ('version', '1.5.0');
+            INSERT INTO docent_info (key, value) VALUES ('version', '2.0.0');
             INSERT INTO docent_info (key, value) VALUES ('model', 'apple-nl-v1');
-            
+
             CREATE TABLE docent_chunks (
                 id INTEGER PRIMARY KEY,
                 file_path TEXT,
@@ -158,11 +158,12 @@ class Compiler {
                 content_hash TEXT,
                 last_seen INTEGER
             );
-            
+
             CREATE TABLE docent_vectors (
                 chunk_id INTEGER PRIMARY KEY,
                 title_vector BLOB,
                 body_vector BLOB,
+                pure_body_vector BLOB,
                 dimensions INTEGER,
                 FOREIGN KEY(chunk_id) REFERENCES docent_chunks(id)
             );
@@ -256,6 +257,7 @@ class Compiler {
                 title: title,
                 breadcrumb: breadcrumb,
                 body: contextBody,
+                pureBody: bodyText,
                 priority: fileMetadata.priority,
                 tags: fileMetadata.tags
             ))
@@ -282,10 +284,12 @@ class Compiler {
         createChunk()
         
         if chunks.isEmpty && !currentBody.isEmpty {
+            let fallbackBody = currentBody.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
             chunks.append(RawChunk(
                 title: fileMetadata.title ?? "General",
                 breadcrumb: fileMetadata.title ?? "General",
-                body: currentBody.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines),
+                body: fallbackBody,
+                pureBody: fallbackBody,
                 priority: fileMetadata.priority,
                 tags: fileMetadata.tags
             ))
@@ -325,15 +329,18 @@ class Compiler {
         guard let embedding = embedding else {
             throw DocentError.embeddingError("NLEmbedding unavailable")
         }
-        
+
         guard let titleVector = embedding.vector(for: chunk.breadcrumb),
-              let bodyVector = embedding.vector(for: chunk.body) else { return }
-        
+              let bodyVector = embedding.vector(for: chunk.body),
+              let pureBodyVector = embedding.vector(for: chunk.pureBody) else { return }
+
         let titleFloatVector = titleVector.map { Float32($0) }
         let bodyFloatVector = bodyVector.map { Float32($0) }
-        
+        let pureBodyFloatVector = pureBodyVector.map { Float32($0) }
+
         var titleVectorData = titleFloatVector.withUnsafeBytes { Data($0) }
         var bodyVectorData = bodyFloatVector.withUnsafeBytes { Data($0) }
+        var pureBodyVectorData = pureBodyFloatVector.withUnsafeBytes { Data($0) }
         var contentData = chunk.body.data(using: .utf8)!
         var encryptionType = 0
 
@@ -341,6 +348,7 @@ class Compiler {
             contentData = try service.encrypt(contentData)
             titleVectorData = try service.encrypt(titleVectorData)
             bodyVectorData = try service.encrypt(bodyVectorData)
+            pureBodyVectorData = try service.encrypt(pureBodyVectorData)
             encryptionType = 2
         }
         
@@ -370,12 +378,13 @@ class Compiler {
         let chunkId = db.lastInsertRowId()
         db.finalize(chunkStmt)
         
-        let vectorSql = "INSERT INTO docent_vectors (chunk_id, title_vector, body_vector, dimensions) VALUES (?, ?, ?, ?);"
+        let vectorSql = "INSERT INTO docent_vectors (chunk_id, title_vector, body_vector, pure_body_vector, dimensions) VALUES (?, ?, ?, ?, ?);"
         let vectorStmt = try db.prepare(sql: vectorSql)
         sqlite3_bind_int64(vectorStmt, 1, chunkId)
         _ = titleVectorData.withUnsafeBytes { sqlite3_bind_blob(vectorStmt, 2, $0.baseAddress, Int32(titleVectorData.count), nil) }
         _ = bodyVectorData.withUnsafeBytes { sqlite3_bind_blob(vectorStmt, 3, $0.baseAddress, Int32(bodyVectorData.count), nil) }
-        sqlite3_bind_int(vectorStmt, 4, Int32(titleFloatVector.count))
+        _ = pureBodyVectorData.withUnsafeBytes { sqlite3_bind_blob(vectorStmt, 4, $0.baseAddress, Int32(pureBodyVectorData.count), nil) }
+        sqlite3_bind_int(vectorStmt, 5, Int32(titleFloatVector.count))
         
         if sqlite3_step(vectorStmt) != SQLITE_DONE { throw DocentError.databaseError("Failed to insert vectors") }
         db.finalize(vectorStmt)
@@ -387,7 +396,8 @@ class Compiler {
 struct RawChunk {
     let title: String
     let breadcrumb: String
-    let body: String
+    let body: String       // context-injected: "breadcrumb: bodyText"
+    let pureBody: String   // raw body text only, for pure-body vector
     let priority: Double
     let tags: String?
 }
