@@ -185,9 +185,10 @@ public struct DocentSearchView: View {
 
                 await MainActor.run { results = searchResults }
 
-                // Only synthesize when retrieval has at least one high-confidence hit
+                // Only synthesize when retrieval has at least one medium-confidence hit
                 guard synthesisAvailable,
-                      searchResults.first?.confidence == .high else { return }
+                      searchResults.first?.confidence == .high ||
+                      searchResults.first?.confidence == .medium else { return }
 
                 if #available(macOS 26.0, iOS 19.0, *) {
                     await performSynthesis(query: trimmed)
