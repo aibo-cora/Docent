@@ -100,6 +100,7 @@ public struct DocentSearchView: View {
     @State private var synthesizedAnswer = ""
     @State private var isSynthesizing = false
     @State private var synthesisAvailable = false
+    @State private var searchTask: Task<Void, Never>? = nil
 
     private let engine: DocentEngine
     private let configuration: DocentSearchConfiguration
@@ -164,30 +165,35 @@ public struct DocentSearchView: View {
 
     private func performSearch(query: String) {
         let trimmed = query.trimmingCharacters(in: .whitespaces)
+
+        searchTask?.cancel()
+        synthesizedAnswer = ""
+
         guard !trimmed.isEmpty else {
             results = []
-            synthesizedAnswer = ""
             return
         }
 
         isSearching = true
-        synthesizedAnswer = ""
 
-        Task {
+        searchTask = Task {
+            defer { Task { @MainActor in isSearching = false } }
+
             do {
                 let searchResults = try await engine.query(trimmed, configuration: configuration)
-                await MainActor.run {
-                    self.results = searchResults
-                    self.isSearching = false
+                guard !Task.isCancelled else { return }
+
+                await MainActor.run { results = searchResults }
+
+                // Only synthesize when retrieval has at least one high-confidence hit
+                guard synthesisAvailable,
+                      searchResults.first?.confidence == .high else { return }
+
+                if #available(macOS 26.0, iOS 19.0, *) {
+                    await performSynthesis(query: trimmed)
                 }
             } catch {
-                await MainActor.run { self.isSearching = false }
-            }
-        }
-
-        if synthesisAvailable {
-            if #available(macOS 26.0, iOS 19.0, *) {
-                Task { await performSynthesis(query: trimmed) }
+                // Task cancellation is expected — ignore silently
             }
         }
     }
@@ -197,17 +203,19 @@ public struct DocentSearchView: View {
         await MainActor.run { isSynthesizing = true }
         do {
             let stream = try await engine.synthesize(query, provider: AppleIntelligenceProvider())
-            var hasTokens = false
             for try await token in stream {
-                hasTokens = true
+                guard !Task.isCancelled else { break }
                 await MainActor.run { synthesizedAnswer += token }
             }
-            await MainActor.run {
-                isSynthesizing = false
-                if !hasTokens { synthesizedAnswer = "" }
+        } catch { }
+
+        await MainActor.run {
+            isSynthesizing = false
+            // Suppress bare "I don't know" non-answers — engine returned below-threshold context
+            let lower = synthesizedAnswer.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
+            if lower.hasPrefix("i don't know") || lower.hasPrefix("i do not know") {
+                synthesizedAnswer = ""
             }
-        } catch {
-            await MainActor.run { isSynthesizing = false }
         }
     }
 }
